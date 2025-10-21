@@ -1,4 +1,5 @@
 mod ahoy;
+mod blp;
 
 use crate::error::Result;
 use crate::types::discord::Interaction;
@@ -25,6 +26,7 @@ pub trait Command {
 pub fn all_commands() -> Vec<SlashCommand> {
     vec![
         ahoy::Ahoy::definition(),
+        blp::Blp::definition(),
     ]
 }
 
@@ -41,6 +43,7 @@ pub async fn handle_interaction(interaction: Interaction) -> Result<()> {
 
     match data.name.as_str() {
         "ahoy" => ahoy::Ahoy::handle(interaction).await,
+        "blp" => blp::Blp::handle(interaction).await,
         _ => Ok(()), // Unknown command, ignore
     }
 }

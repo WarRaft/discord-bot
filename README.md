@@ -1,15 +1,17 @@
 # Discord Bot in Rust
 
-Discord bot with modular slash commands built with tokio, without specialized Discord libraries.
+**@Raft** - Discord bot with BLP image conversion and modular slash commands built with tokio, without specialized Discord libraries.
 
 ## Features
 
 - Direct WebSocket connection to Discord Gateway
 - MongoDB state persistence with session resumption
+- **BLP Image Conversion** - Bidirectional conversion between PNG and BLP formats
+- Persistent queue system with event-driven workers
 - Modular slash command system (see `src/commands/`)
 - Auto-reconnect with progressive backoff
 - Custom error handling with stack traces
-- Rate limit tracking
+- Token bucket rate limiting (40 req/sec default)
 - Session event logging
 - Signal-based command reregistration (SIGUSR1)
 
@@ -66,7 +68,6 @@ WantedBy=multi-user.target
 - `DISCORD_BOT_TOKEN` - your Discord bot token
 - `MONGO_URL` - MongoDB connection string
 - `MONGO_DB` - MongoDB database name
-- `DISCORD_GUILD_ID` - (optional) for instant command registration
 
 Manage service:
 ```bash
@@ -117,10 +118,35 @@ The bot creates and uses these collections:
 - **discord_session_events** - Event log (identify, resume, ready, resumed, invalid_session)
 - **discord_rate_limits** - HTTP API rate limits per endpoint
 - **discord_session_limits** - Session start limits tracking
+- **discord_command_blp** - BLP conversion queue (pending, processing, completed, failed)
 
 ## Commands
 
 See [src/commands/README.md](src/commands/README.md) for details on adding new commands.
+
+### BLP Image Conversion
+
+Convert images between PNG and Warcraft III BLP formats by mentioning the bot with attached images:
+
+**PNG → BLP:**
+```
+@Raft blp 80           # Convert to BLP with quality 80
+@Raft blp              # Convert to BLP with default quality (80)
+@Raft blp 95           # Convert to BLP with quality 95
+```
+
+**BLP → PNG:**
+```
+@Raft png              # Convert BLP to PNG
+```
+
+**Features:**
+- Supports multiple files in one message
+- Quality range for BLP: 1-100
+- Preserves original filenames (changes extension)
+- Persistent queue survives service restarts
+- Event-driven workers with automatic rate limiting
+- In-memory processing (no temporary files)
 
 ### Reregister Commands
 

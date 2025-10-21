@@ -35,6 +35,7 @@ pub enum EventType {
     Ready,
     Resumed,
     InteractionCreate,
+    MessageCreate,
     Unknown,
 }
 
@@ -44,6 +45,7 @@ impl EventType {
             "READY" => Self::Ready,
             "RESUMED" => Self::Resumed,
             "INTERACTION_CREATE" => Self::InteractionCreate,
+            "MESSAGE_CREATE" => Self::MessageCreate,
             _ => Self::Unknown,
         }
     }
@@ -68,15 +70,17 @@ impl DiscordEvent {
     pub fn opcode(&self) -> Opcode {
         Opcode::from_u8(self.op)
     }
-    
+
     pub fn event_type(&self) -> EventType {
-        self.t.as_deref()
+        self.t
+            .as_deref()
             .map(EventType::from_str)
             .unwrap_or(EventType::Unknown)
     }
 }
 
 // Interaction from Discord
+#[allow(dead_code)]
 #[derive(Debug, Deserialize)]
 pub struct Interaction {
     pub id: String,
@@ -84,11 +88,80 @@ pub struct Interaction {
     pub interaction_type: u8,
     pub data: Option<InteractionData>,
     pub token: String,
+    pub channel_id: Option<String>,
+    pub message: Option<InteractionMessage>,
+    pub user: Option<InteractionUser>,
 }
 
+#[allow(dead_code)]
+#[derive(Debug, Deserialize)]
+pub struct InteractionUser {
+    pub id: String,
+    pub username: String,
+}
+
+#[allow(dead_code)]
+#[derive(Debug, Deserialize)]
+pub struct InteractionMessage {
+    pub id: Option<String>,
+    pub attachments: Option<Vec<MessageAttachment>>,
+}
+
+#[allow(dead_code)]
+#[derive(Debug, Clone, Deserialize)]
+pub struct MessageAttachment {
+    pub id: String,
+    pub filename: String,
+    pub url: String,
+    pub size: u64,
+}
+
+#[allow(dead_code)]
 #[derive(Debug, Deserialize)]
 pub struct InteractionData {
     pub name: String,
+    pub resolved: Option<InteractionResolved>,
+}
+
+#[allow(dead_code)]
+#[derive(Debug, Deserialize)]
+pub struct InteractionResolved {
+    pub messages: Option<std::collections::HashMap<String, ResolvedMessage>>,
+}
+
+#[allow(dead_code)]
+#[derive(Debug, Deserialize)]
+pub struct ResolvedMessage {
+    pub id: String,
+    pub attachments: Option<Vec<MessageAttachment>>,
+}
+
+// Message from MESSAGE_CREATE event
+#[derive(Debug, Deserialize)]
+pub struct Message {
+    pub id: String,
+    pub channel_id: String,
+    pub content: String,
+    pub author: MessageAuthor,
+    #[serde(default)]
+    pub attachments: Vec<MessageAttachment>,
+    #[serde(default)]
+    pub mentions: Vec<MessageMention>,
+}
+
+#[allow(dead_code)]
+#[derive(Debug, Deserialize)]
+pub struct MessageAuthor {
+    pub id: String,
+    pub username: String,
+    pub bot: Option<bool>,
+}
+
+#[allow(dead_code)]
+#[derive(Debug, Deserialize)]
+pub struct MessageMention {
+    pub id: String,
+    pub username: String,
 }
 
 // Interaction response to Discord
@@ -120,25 +193,26 @@ pub struct DiscordErrorResponse {
 
 impl std::fmt::Display for DiscordErrorResponse {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "[{}] {}", 
-            self.code.unwrap_or(0), 
-            self.message
-        )?;
-        
+        write!(f, "[{}] {}", self.code.unwrap_or(0), self.message)?;
+
         if let Some(retry) = self.retry_after {
             write!(f, " (retry after {:.3}s)", retry)?;
         }
-        
+
         if let Some(global) = self.global {
             if global {
                 write!(f, " [GLOBAL]")?;
             }
         }
-        
+
         if let Some(errors) = &self.errors {
-            write!(f, "\nDetails: {}", serde_json::to_string_pretty(errors).unwrap_or_default())?;
+            write!(
+                f,
+                "\nDetails: {}",
+                serde_json::to_string_pretty(errors).unwrap_or_default()
+            )?;
         }
-        
+
         Ok(())
     }
 }
@@ -162,6 +236,6 @@ pub struct GatewayBotInfo {
 pub struct SessionStartLimit {
     pub total: i32,
     pub remaining: i32,
-    pub reset_after: i64,  // milliseconds
+    pub reset_after: i64, // milliseconds
     pub max_concurrency: i32,
 }

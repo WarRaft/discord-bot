@@ -24,27 +24,9 @@ SERVICE_NAME="WarRaftDiscord"
 # This should match the filename in the ExecStart path of your systemd service
 BINARY_NAME="warraft-discord-linux"
 
-# Discord bot token
-# You can get this from Discord Developer Portal (https://discord.com/developers/applications)
-# This should match the DISCORD_TOKEN in your systemd service Environment
+# Discord token (from systemd service Environment)
+# Get this from https://discord.com/developers/applications
 DISCORD_TOKEN="your_discord_bot_token_here"
 
-# Discord guild ID for instant command registration (optional)
-# Right-click on server name in Discord (with Developer Mode enabled) and select "Copy Server ID"
-# If set, slash commands will be registered to this specific guild (appears instantly)
-# If empty, commands will be registered globally (can take up to 1 hour to propagate)
-# This should match the DISCORD_GUILD_ID in your systemd service Environment
-DISCORD_GUILD_ID=""
-
 # MongoDB connection settings
-# MongoDB connection URL with authentication
-# Format: mongodb://username:password@host:port/authDatabase
-# Example: mongodb://admin:password123@127.0.0.1:27017/admin
-# This should match the MONGO_URL in your systemd service Environment
-MONGO_URL="mongodb://admin:your_mongo_password@127.0.0.1:27017/admin"
-
-# MongoDB database name
-# The name of the database where bot state will be stored
-# The bot will create a collection named 'discord_state' in this database
-# This should match the MONGO_DB in your systemd service Environment
-MONGO_DB="warraft"
+# This should match the MongoDB settings in your systemd service Environment

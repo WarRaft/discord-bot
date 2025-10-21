@@ -1,7 +1,7 @@
 use futures_util::{SinkExt, StreamExt};
 use serde_json::json;
 use tokio::time::{Duration, interval};
-use tokio_tungstenite::{connect_async, tungstenite::protocol::Message};
+use tokio_tungstenite::{connect_async, tungstenite::protocol::Message as WsMessage};
 
 use crate::error::Result;
 use crate::types::discord::*;
@@ -14,7 +14,7 @@ pub async fn run_gateway(gateway_url: String) -> Result<()> {
     while let Some(msg) = read.next().await {
         let msg = msg?;
 
-        if let Message::Text(text) = msg {
+        if let WsMessage::Text(text) = msg {
             let event: DiscordEvent = serde_json::from_str(&text)?;
             state::update_sequence(event.s).await;
 
@@ -47,7 +47,7 @@ pub async fn run_gateway(gateway_url: String) -> Result<()> {
                             });
                             
                             write
-                                .send(Message::Text(resume.to_string().into()))
+                                .send(WsMessage::Text(resume.to_string().into()))
                                 .await?;
                         } else {
                             // IDENTIFY - new session
@@ -55,22 +55,20 @@ pub async fn run_gateway(gateway_url: String) -> Result<()> {
                                 &*state::db().await
                             ).await;
 
-                            let identify = json!({
-                                "op": Opcode::Identify as u8,
-                                "d": {
-                                    "token": token,
-                                    "intents": 513, // GUILDS + GUILD_MESSAGES
-                                    "properties": {
-                                        "$os": "linux",
-                                        "$browser": "discord-bot",
-                                        "$device": "discord-bot"
-                                    }
-                                }
-                            });
+                            let payload = json!({
+                        "op": 2,
+                        "d": {
+                            "token": token,
+                            "intents": 33280, // GUILDS (1 << 0) + GUILD_MESSAGES (1 << 9) + MESSAGE_CONTENT (1 << 15)
+                            "properties": {
+                                "os": "linux",
+                                "browser": "discord-bot",
+                                "device": "discord-bot"
+                            }
+                        }
+                    });
 
-                            write
-                                .send(Message::Text(identify.to_string().into()))
-                                .await?;
+                    write.send(WsMessage::Text(payload.to_string().into())).await?;
                         }
 
                         // Start heartbeat timer
@@ -87,7 +85,7 @@ pub async fn run_gateway(gateway_url: String) -> Result<()> {
                                         "d": seq
                                     });
                                     
-                                    if write.send(Message::Text(heartbeat.to_string().into())).await.is_err() {
+                                    if write.send(WsMessage::Text(heartbeat.to_string().into())).await.is_err() {
                                         break;
                                     }
                                     
@@ -96,7 +94,7 @@ pub async fn run_gateway(gateway_url: String) -> Result<()> {
                                 }
                                 Some(msg_result) = read.next() => {
                                     match msg_result {
-                                        Ok(Message::Text(text)) => {
+                                        Ok(WsMessage::Text(text)) => {
                                             let event: DiscordEvent = serde_json::from_str(&text)?;
                                             state::update_sequence(event.s).await;
                                             
@@ -146,6 +144,12 @@ async fn handle_dispatch_event(event: DiscordEvent) -> Result<()> {
                         session_id.to_string()
                     ).await;
                 }
+                // Store bot user ID
+                if let Some(user_id) = d["user"]["id"].as_str() {
+                    state::set_bot_user_id(user_id.to_string()).await;
+                } else {
+                    eprintln!("[ERROR] Failed to get bot user ID from READY event");
+                }
             }
         }
         EventType::Resumed => {
@@ -164,7 +168,158 @@ async fn handle_dispatch_event(event: DiscordEvent) -> Result<()> {
                 }
             }
         }
+        EventType::MessageCreate => {
+            if let Some(d) = event.d {
+                if let Ok(message) = serde_json::from_value::<Message>(d.clone()) {
+                    if let Err(e) = handle_message(message).await {
+                        eprintln!("[ERROR] Failed to handle message:");
+                        e.print_tree();
+                    }
+                } else {
+                    eprintln!("[ERROR] Failed to parse MESSAGE_CREATE event");
+                }
+            }
+        }
         EventType::Unknown => {}
     }
     Ok(())
+}
+
+async fn handle_message(message: Message) -> Result<()> {
+    // Ignore bot messages
+    if message.author.bot.unwrap_or(false) {
+        return Ok(());
+    }
+
+    // Check if bot is mentioned
+    let bot_user_id = state::bot_user_id().await;
+    
+    let bot_mentioned = message.mentions.iter().any(|m| m.id == bot_user_id);
+    
+    if !bot_mentioned {
+        return Ok(());
+    }
+
+    // Check if message contains "blp" or "png" command (trim whitespace)
+    let content_lower = message.content.trim().to_lowercase();
+    
+    let (_command, conversion_type) = if content_lower.contains("blp") {
+        ("blp", crate::db::blp_queue::ConversionType::ToBLP)
+    } else if content_lower.contains("png") {
+        ("png", crate::db::blp_queue::ConversionType::ToPNG)
+    } else {
+        return Ok(());
+    };
+
+    // Check if there are attachments
+    if message.attachments.is_empty() {
+        return Ok(());
+    }
+
+    // Parse quality from message (default 80, only used for BLP conversion)
+    let quality = parse_quality_from_content(&message.content).unwrap_or(80);
+
+    // Add to queue
+    use crate::db::blp_queue::{AttachmentItem, BlpQueueItem};
+    
+    let attachments: Vec<AttachmentItem> = message.attachments
+        .into_iter()
+        .map(|att| AttachmentItem {
+            url: att.url,
+            filename: att.filename,
+            converted_path: None,
+        })
+        .collect();
+
+    // Send confirmation message FIRST to get message ID
+    // Acquire rate limit token before sending
+    let limiter = state::rate_limiter().await;
+    limiter.acquire().await;
+    
+    let client = state::client().await;
+    let token = state::token().await;
+    
+    let format_desc = match conversion_type {
+        crate::db::blp_queue::ConversionType::ToBLP => format!("to BLP (quality: {})", quality),
+        crate::db::blp_queue::ConversionType::ToPNG => "to PNG".to_string(),
+    };
+    
+    let response = client
+        .post(&format!("https://discord.com/api/v10/channels/{}/messages", message.channel_id))
+        .header("Authorization", format!("Bot {}", token))
+        .header("Content-Type", "application/json")
+        .json(&serde_json::json!({
+            "content": format!(
+                "✅ Added {} image(s) to conversion queue {}\n⏳ Processing...",
+                attachments.len(),
+                format_desc
+            ),
+            "message_reference": {
+                "message_id": message.id
+            }
+        }))
+        .send()
+        .await?;
+
+    // Get status message ID
+    let status_message_id = if response.status().is_success() {
+        if let Ok(msg_data) = response.json::<serde_json::Value>().await {
+            msg_data["id"].as_str().map(|s| s.to_string())
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+
+    // Create queue item with status_message_id already set
+    let mut queue_item = BlpQueueItem::new(
+        message.author.id.clone(),
+        message.channel_id.clone(),
+        message.id.clone(),
+        String::new(), // No interaction_id for messages
+        String::new(), // No interaction_token for messages
+        attachments,
+        conversion_type,
+        quality,
+    );
+    
+    // Set status_message_id before inserting
+    queue_item.status_message_id = status_message_id;
+
+    let db = state::db().await;
+    let _queue_id = queue_item.insert(&*db).await?;
+
+    // Notify workers that a new task is available
+    crate::workers::notify_new_task();
+
+    Ok(())
+}
+
+fn parse_quality_from_content(content: &str) -> Option<u8> {
+    // Look for "blp 80" or "blp80" pattern
+    let words: Vec<&str> = content.split_whitespace().collect();
+    
+    for (i, word) in words.iter().enumerate() {
+        if word.to_lowercase() == "blp" {
+            // Check next word
+            if let Some(next) = words.get(i + 1) {
+                if let Ok(q) = next.parse::<u8>() {
+                    if (1..=100).contains(&q) {
+                        return Some(q);
+                    }
+                }
+            }
+        } else if word.to_lowercase().starts_with("blp") {
+            // Check if number follows immediately (e.g., "blp80")
+            let num_part = &word[3..];
+            if let Ok(q) = num_part.parse::<u8>() {
+                if (1..=100).contains(&q) {
+                    return Some(q);
+                }
+            }
+        }
+    }
+    
+    None
 }

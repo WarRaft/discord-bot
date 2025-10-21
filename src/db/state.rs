@@ -9,6 +9,8 @@ pub struct DiscordState {
     pub id: String,
     pub session_id: Option<String>,
     pub sequence: Option<u64>,
+    pub bot_user_id: Option<String>,
+    pub rate_limit: Option<f64>, // requests per second
 }
 
 impl DiscordState {
@@ -26,6 +28,8 @@ impl DiscordState {
             id: Self::STATE_ID.to_string(),
             session_id: None,
             sequence: None,
+            bot_user_id: None,
+            rate_limit: None,
         }))
     }
 

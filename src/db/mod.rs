@@ -1,3 +1,4 @@
+pub mod blp_queue;
 pub mod mongo;
 pub mod state;
 pub mod heartbeat;

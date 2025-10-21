@@ -4,11 +4,15 @@ mod discord;
 mod error;
 mod state;
 mod types;
+mod workers;
 
 use std::env;
 use tokio::time::Duration;
 
 use error::Result;
+
+// Number of concurrent BLP processing workers
+const BLP_WORKER_COUNT: usize = 3;
 
 async fn register_commands() -> Result<()> {
     let token = state::token().await;
@@ -56,6 +60,21 @@ async fn main() -> Result<()> {
         .expect("MONGO_DB not set at compile time or runtime");
 
     state::init_bot_state(token, &mongo_url, &mongo_db).await?;
+    
+    // Reset stuck BLP queue items from previous run
+    let db = state::db().await;
+    match db::blp_queue::BlpQueueItem::reset_stuck_items(&*db, 10).await {
+        Ok(count) if count > 0 => {
+            eprintln!("[QUEUE] Reset {} stuck BLP processing items", count);
+        }
+        Ok(_) => {}
+        Err(e) => {
+            eprintln!("[QUEUE] Failed to reset stuck items: {:?}", e);
+        }
+    }
+    
+    // Start BLP worker pool
+    workers::start_blp_workers(BLP_WORKER_COUNT);
     
     // Setup SIGUSR1 signal handler for command reregistration
     tokio::spawn(async {
