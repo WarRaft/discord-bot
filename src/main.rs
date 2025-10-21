@@ -1,3 +1,4 @@
+mod commands;
 mod db;
 mod discord;
 mod error;
@@ -9,6 +10,16 @@ use tokio::time::Duration;
 
 use error::Result;
 
+async fn register_commands() -> Result<()> {
+    let token = state::token().await;
+    let client = state::client().await;
+    let app_id = discord::api::get_application_id(&client, &token).await?;
+
+    discord::api::register_slash_commands(&client, &token, &app_id).await?;
+    tokio::time::sleep(Duration::from_secs(2)).await;
+    Ok(())
+}
+
 async fn run_bot() -> Result<()> {
     // Fetch and store bot info with session limits
     let token = state::token().await;
@@ -17,14 +28,10 @@ async fn run_bot() -> Result<()> {
 
     // Register slash commands only on first start to avoid rate limiting
     if state::should_register_commands().await {
-        let app_id = discord::api::get_application_id(&client, &token).await?;
-
-        if let Err(e) = discord::api::register_slash_commands(&client, &token, &app_id).await {
+        if let Err(e) = register_commands().await {
             eprintln!("[ERROR] Failed to register commands:");
             e.print_tree();
         }
-
-        tokio::time::sleep(Duration::from_secs(2)).await;
     }
 
     let gateway_url = discord::api::get_gateway_url(&client, &token).await?;
@@ -49,6 +56,23 @@ async fn main() -> Result<()> {
         .expect("MONGO_DB not set at compile time or runtime");
 
     state::init_bot_state(token, &mongo_url, &mongo_db).await?;
+    
+    // Setup SIGUSR1 signal handler for command reregistration
+    tokio::spawn(async {
+        use tokio::signal::unix::{signal, SignalKind};
+        let mut stream = signal(SignalKind::user_defined1()).expect("Failed to setup SIGUSR1 handler");
+        loop {
+            stream.recv().await;
+            eprintln!("[SIGNAL] Received SIGUSR1 - reregistering commands...");
+            if let Err(e) = register_commands().await {
+                eprintln!("[ERROR] Failed to reregister commands:");
+                e.print_tree();
+            } else {
+                eprintln!("[SIGNAL] Commands reregistered successfully");
+            }
+        }
+    });
+    
     let mut attempt = 0;
 
     // Infinite retry loop

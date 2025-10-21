@@ -5,7 +5,6 @@ use tokio_tungstenite::{connect_async, tungstenite::protocol::Message};
 
 use crate::error::Result;
 use crate::types::discord::*;
-use crate::discord::api;
 use crate::state;
 
 pub async fn run_gateway(gateway_url: String) -> Result<()> {
@@ -158,7 +157,7 @@ async fn handle_dispatch_event(event: DiscordEvent) -> Result<()> {
         EventType::InteractionCreate => {
             if let Some(d) = event.d {
                 if let Ok(interaction) = serde_json::from_value::<Interaction>(d) {
-                    if let Err(e) = handle_interaction(interaction).await {
+                    if let Err(e) = crate::commands::handle_interaction(interaction).await {
                         eprintln!("[ERROR] Failed to handle interaction:");
                         e.print_tree();
                     }
@@ -166,27 +165,6 @@ async fn handle_dispatch_event(event: DiscordEvent) -> Result<()> {
             }
         }
         EventType::Unknown => {}
-    }
-    Ok(())
-}
-
-async fn handle_interaction(interaction: Interaction) -> Result<()> {
-    if interaction.interaction_type == 2 {
-        // Application command
-        if let Some(data) = interaction.data {
-            if data.name == "ahoy" {
-                let client = state::client().await;
-                let token = state::token().await;
-                api::respond_to_interaction(
-                    &client,
-                    &token,
-                    &interaction.id,
-                    &interaction.token,
-                    "Aye aye, Captain! Raft's afloat!".to_string(),
-                )
-                .await?;
-            }
-        }
     }
     Ok(())
 }

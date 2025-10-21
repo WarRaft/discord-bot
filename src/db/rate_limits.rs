@@ -111,6 +111,7 @@ impl RateLimit {
     }
 
     /// Get current rate limit for a route
+    #[allow(dead_code)]
     pub async fn get(db: &mongodb::Database, route: &str) -> Result<Option<RateLimit>> {
         let collection: Collection<RateLimit> = db.collection(Self::COLLECTION_NAME);
         
@@ -122,6 +123,7 @@ impl RateLimit {
     }
 
     /// Check if we can make a request (remaining > 0 or reset time has passed)
+    #[allow(dead_code)]
     pub fn can_request(&self) -> bool {
         if self.remaining > 0 {
             return true;
@@ -133,6 +135,7 @@ impl RateLimit {
     }
 
     /// Get seconds to wait before next request is allowed
+    #[allow(dead_code)]
     pub fn retry_after(&self) -> f64 {
         if self.remaining > 0 {
             return 0.0;

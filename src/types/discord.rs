@@ -104,15 +104,6 @@ pub struct InteractionResponseData {
     pub content: String,
 }
 
-// Slash command
-#[derive(Debug, Serialize)]
-pub struct SlashCommand {
-    pub name: String,
-    pub description: String,
-    #[serde(rename = "type")]
-    pub command_type: u8,
-}
-
 // Discord API error response
 #[derive(Debug, Deserialize)]
 pub struct DiscordErrorResponse {
@@ -161,6 +152,7 @@ pub struct ApplicationInfo {
 // Gateway Bot info with session limits
 #[derive(Debug, Deserialize)]
 pub struct GatewayBotInfo {
+    #[allow(dead_code)]
     pub url: String,
     pub shards: i32,
     pub session_start_limit: SessionStartLimit,

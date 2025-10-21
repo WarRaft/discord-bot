@@ -114,11 +114,7 @@ pub async fn get_application_id(client: &Client, token: &str) -> Result<String> 
 }
 
 pub async fn register_slash_commands(client: &Client, token: &str, app_id: &str) -> Result<()> {
-    let commands = vec![SlashCommand {
-        name: "ahoy".to_string(),
-        description: "A pirate greeting".to_string(),
-        command_type: 1,
-    }];
+    let commands = crate::commands::all_commands();
 
     let response = client
         .put(&format!(

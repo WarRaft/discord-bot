@@ -1,16 +1,17 @@
 # Discord Bot in Rust
 
-Discord bot with `/ahoy` command built with tokio, without specialized Discord libraries.
+Discord bot with modular slash commands built with tokio, without specialized Discord libraries.
 
 ## Features
 
 - Direct WebSocket connection to Discord Gateway
 - MongoDB state persistence with session resumption
-- Slash command support
+- Modular slash command system (see `src/commands/`)
 - Auto-reconnect with progressive backoff
 - Custom error handling with stack traces
 - Rate limit tracking
 - Session event logging
+- Signal-based command reregistration (SIGUSR1)
 
 ## Quick Start
 
@@ -115,4 +116,18 @@ The bot creates and uses these collections:
 - **discord_heartbeat** - Heartbeat counter with timestamp
 - **discord_session_events** - Event log (identify, resume, ready, resumed, invalid_session)
 - **discord_rate_limits** - HTTP API rate limits per endpoint
-- **discord_session_limits** - Gateway session start limits
+- **discord_session_limits** - Session start limits tracking
+
+## Commands
+
+See [src/commands/README.md](src/commands/README.md) for details on adding new commands.
+
+### Reregister Commands
+
+Trigger command reregistration without restarting the service:
+
+```bash
+./reregister-commands.sh
+```
+
+This sends SIGUSR1 signal to the bot, causing immediate command reregistration.

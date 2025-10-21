@@ -62,6 +62,7 @@ impl SessionLimit {
     }
 
     /// Get current session limit information
+    #[allow(dead_code)]
     pub async fn get(db: &mongodb::Database) -> Result<Option<SessionLimit>> {
         let collection: Collection<SessionLimit> = db.collection(Self::COLLECTION_NAME);
         
@@ -73,11 +74,13 @@ impl SessionLimit {
     }
 
     /// Check if we can start a new session
+    #[allow(dead_code)]
     pub fn can_start_session(&self) -> bool {
         self.remaining > 0
     }
 
     /// Get seconds to wait before we can start a new session
+    #[allow(dead_code)]
     pub fn retry_after_seconds(&self) -> f64 {
         if self.remaining > 0 {
             return 0.0;
