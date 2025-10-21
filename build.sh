@@ -24,7 +24,7 @@ fi
 source build-sensitive.sh
 
 if ! command -v jq &> /dev/null; then
-    echo "❌ Требуется 'jq'. Установи: brew install jq"
+    echo "❌ 'jq' is required. Install: brew install jq (macOS) or apt install jq (Linux)"
     exit 1
 fi
 
@@ -34,57 +34,57 @@ mkdir -p "$DIST_DIR"
 
 echo "🐧 Building for Linux (x86_64-unknown-linux-musl)..."
 rustup target add x86_64-unknown-linux-musl &>/dev/null || true
-cargo build --release --target x86_64-unknown-linux-musl
+DISCORD_BOT_TOKEN="$DISCORD_TOKEN" MONGO_URL="$MONGO_URL" MONGO_DB="$MONGO_DB" cargo build --release --target x86_64-unknown-linux-musl
 cp "target/x86_64-unknown-linux-musl/release/$PROJECT_NAME" "$DIST_DIR/$BINARY_NAME"
 
 echo ""
 echo "✅ Build complete:"
 ls -lh "$DIST_DIR"
 
-# Проверка наличия sshpass
+# Check for sshpass
 if ! command -v sshpass &> /dev/null; then
-    echo "❌ Требуется 'sshpass'. Установи: brew install hudochenkov/sshpass/sshpass или sudo apt install sshpass"
+    echo "❌ 'sshpass' is required. Install: brew install hudochenkov/sshpass/sshpass (macOS) or sudo apt install sshpass (Linux)"
     exit 1
 fi
 
 TMP_FILE="$BINARY_NAME.tmp"
 FINAL_FILE="$BINARY_NAME"
 
-echo "📁 Подготовка директории $REMOTE_PATH на $REMOTE_HOST..."
+echo "📁 Preparing directory $REMOTE_PATH on $REMOTE_HOST..."
 sshpass -p "$REMOTE_PASS" ssh -p "$REMOTE_PORT" "$REMOTE_USER@$REMOTE_HOST" bash <<EOF
   set -e
   if [ ! -d "$REMOTE_PATH" ]; then
-    echo "📁 Директория не найдена, создаю..."
+    echo "📁 Directory not found, creating..."
     mkdir -p "$REMOTE_PATH"
     chown $REMOTE_USER:$REMOTE_USER "$REMOTE_PATH"
     chmod 755 "$REMOTE_PATH"
   else
-    echo "📁 Директория существует."
+    echo "📁 Directory exists."
   fi
 EOF
 
-echo "🛑 Остановка службы $SERVICE_NAME..."
+echo "🛑 Stopping service $SERVICE_NAME..."
 sshpass -p "$REMOTE_PASS" ssh -p "$REMOTE_PORT" "$REMOTE_USER@$REMOTE_HOST" "
   systemctl stop $SERVICE_NAME || true
 "
 
-echo "📤 Загрузка бинарника во временный файл ($TMP_FILE)..."
+echo "📤 Uploading binary to temporary file ($TMP_FILE)..."
 sshpass -p "$REMOTE_PASS" scp -P "$REMOTE_PORT" "$DIST_DIR/$FINAL_FILE" "$REMOTE_USER@$REMOTE_HOST:$REMOTE_PATH/$TMP_FILE"
 
-echo "🔁 Перемещение $TMP_FILE в $FINAL_FILE и установка прав..."
+echo "🔁 Moving $TMP_FILE to $FINAL_FILE and setting permissions..."
 sshpass -p "$REMOTE_PASS" ssh -p "$REMOTE_PORT" "$REMOTE_USER@$REMOTE_HOST" bash <<EOF
   set -e
   mv -f "$REMOTE_PATH/$TMP_FILE" "$REMOTE_PATH/$FINAL_FILE"
   chmod +x "$REMOTE_PATH/$FINAL_FILE"
-  echo "✅ Бинарник заменён и готов к запуску."
+  echo "✅ Binary replaced and ready to run."
 EOF
 
-echo "🚀 Перезапуск службы $SERVICE_NAME..."
+echo "🚀 Restarting service $SERVICE_NAME..."
 sshpass -p "$REMOTE_PASS" ssh -p "$REMOTE_PORT" "$REMOTE_USER@$REMOTE_HOST" "
   systemctl start $SERVICE_NAME
 "
 
-echo "📊 Проверка статуса службы $SERVICE_NAME..."
+echo "📊 Checking service status $SERVICE_NAME..."
 sshpass -p "$REMOTE_PASS" ssh -p "$REMOTE_PORT" "$REMOTE_USER@$REMOTE_HOST" "
   systemctl status $SERVICE_NAME --no-pager --full
 "

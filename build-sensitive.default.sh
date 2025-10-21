@@ -19,7 +19,7 @@ REMOTE_PASS="your_ssh_password"
 
 # Service settings
 # The name of your systemd service (without .service extension)
-SERVICE_NAME="warraft-discord"
+SERVICE_NAME="WarRaftDiscord"
 # The name of the binary file on the remote server
 # This should match the filename in the ExecStart path of your systemd service
 BINARY_NAME="warraft-discord-linux"
@@ -28,3 +28,16 @@ BINARY_NAME="warraft-discord-linux"
 # You can get this from Discord Developer Portal (https://discord.com/developers/applications)
 # This should match the DISCORD_TOKEN in your systemd service Environment
 DISCORD_TOKEN="your_discord_bot_token_here"
+
+# MongoDB connection settings
+# MongoDB connection URL with authentication
+# Format: mongodb://username:password@host:port/authDatabase
+# Example: mongodb://admin:password123@127.0.0.1:27017/admin
+# This should match the MONGO_URL in your systemd service Environment
+MONGO_URL="mongodb://admin:your_mongo_password@127.0.0.1:27017/admin"
+
+# MongoDB database name
+# The name of the database where bot state will be stored
+# The bot will create a collection named 'discord_state' in this database
+# This should match the MONGO_DB in your systemd service Environment
+MONGO_DB="warraft"
