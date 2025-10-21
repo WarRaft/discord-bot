@@ -104,3 +104,12 @@ pub async fn token() -> String {
 pub async fn client() -> Client {
     bot_state().await.client.clone()
 }
+
+pub async fn log_heartbeat() -> Result<i64> {
+    let state = bot_state().await;
+    crate::db::heartbeat::Heartbeat::increment(&state.db).await
+}
+
+pub async fn db() -> Arc<mongodb::Database> {
+    bot_state().await.db.clone()
+}

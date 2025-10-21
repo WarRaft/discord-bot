@@ -5,20 +5,25 @@ Discord bot with `/ahoy` command built with tokio, without specialized Discord l
 ## Features
 
 - Direct WebSocket connection to Discord Gateway
-- Thread-safe state with `Arc<Mutex<>>`
+- MongoDB state persistence with session resumption
 - Slash command support
 - Auto-reconnect with progressive backoff
 - Custom error handling with stack traces
+- Rate limit tracking
+- Session event logging
 
 ## Quick Start
 
 ```bash
-# Set token
-export DISCORD_BOT_TOKEN="your_token"
+# Configure build-sensitive.sh with your credentials
+cp build-sensitive.default.sh build-sensitive.sh
+nano build-sensitive.sh
 
-# Build and run
-cargo build --release
-./target/release/discord-bot
+# Build for Linux
+./build.sh
+
+# Run locally (if built for your platform)
+cargo run --release
 ```
 
 ## Deployment
@@ -28,45 +33,11 @@ cargo build --release
 cp build-sensitive.default.sh build-sensitive.sh
 nano build-sensitive.sh
 
-# Build and deploy
+# Build for Linux
 ./build.sh
-```
 
-## Project Structure
-
-- `src/main.rs` - bot implementation
-- `src/error.rs` - error handling
-- `build.sh` - build and deploy script
-- `build-sensitive.sh` - server credentials (gitignored)
-
-## Architecture
-
-**Thread-safe state** accessible from all tasks:
-```rust
-struct BotState {
-    token: String,
-    client: Client,
-    sequence: Arc<Mutex<Option<u64>>>,
-    session_id: Arc<Mutex<Option<String>>>,
-}
-```
-
-**Functional design** - state passed to functions:
-```rust
-async fn get_gateway_url(state: &BotState) -> Result<String>
-async fn handle_interaction(state: &BotState, interaction: Interaction) -> Result<()>
-```
-
-## Logging
-
-Only errors are logged:
-```
-Discord Bot Service - WarRaft (starting)
-
-[ERROR] src/main.rs:218 - websocket
-└── HTTP error: 400 Bad Request
-[RETRY] Reconnecting in 30 seconds (attempt #1)
-```
+# Deploy to production server
+./deploy.sh
 ```
 
 ## systemd Service
@@ -81,6 +52,8 @@ After=network.target
 [Service]
 ExecStart=/var/www/html/warraft/bin/warraft-discord-linux
 Restart=always
+Type=simple
+Environment=RUST_LOG=info
 StandardOutput=journal
 StandardError=journal
 
@@ -88,20 +61,58 @@ StandardError=journal
 WantedBy=multi-user.target
 ```
 
+**Important:** Set environment variables in `build-sensitive.sh` - they are compiled into the binary at build time:
+- `DISCORD_BOT_TOKEN` - your Discord bot token
+- `MONGO_URL` - MongoDB connection string
+- `MONGO_DB` - MongoDB database name
+- `DISCORD_GUILD_ID` - (optional) for instant command registration
+
 Manage service:
 ```bash
-systemctl start WarRaftDiscord    # Start
-systemctl stop WarRaftDiscord     # Stop
-systemctl restart WarRaftDiscord  # Restart
-systemctl status WarRaftDiscord   # Status
-journalctl -u WarRaftDiscord -f   # Logs
+systemctl daemon-reload             # Reload systemd after editing service file
+systemctl enable WarRaftDiscord     # Enable autostart on boot
+systemctl start WarRaftDiscord      # Start service
+systemctl stop WarRaftDiscord       # Stop service
+systemctl restart WarRaftDiscord    # Restart service
+systemctl status WarRaftDiscord     # Check status
+journalctl -u WarRaftDiscord -f     # Follow logs in real-time
+journalctl -u WarRaftDiscord --since "1 hour ago"  # Last hour logs
 ```
 
-## Dependencies
+## nginx Configuration (Optional)
 
-- `tokio` - async runtime with Mutex
-- `tokio-tungstenite` - WebSocket client  
-- `reqwest` - HTTP client
-- `serde` + `serde_json` - JSON serialization
-- `futures-util` - async utilities
-- `futures-util` - utilities for working with Futures
+If you need to expose metrics or health endpoints:
+
+```nginx
+# /etc/nginx/sites-available/warraft-bot
+server {
+    listen 80;
+    server_name bot.warraft.net;
+
+    location /discord/ {
+        proxy_pass http://127.0.0.1:3002/;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_request_buffering off;
+    }
+}
+```
+
+Enable site:
+```bash
+ln -s /etc/nginx/sites-available/warraft-bot /etc/nginx/sites-enabled/
+nginx -t
+systemctl reload nginx
+```
+
+## MongoDB Collections
+
+The bot creates and uses these collections:
+
+- **discord_state** - Session persistence (session_id, sequence)
+- **discord_heartbeat** - Heartbeat counter with timestamp
+- **discord_session_events** - Event log (identify, resume, ready, resumed, invalid_session)
+- **discord_rate_limits** - HTTP API rate limits per endpoint
+- **discord_session_limits** - Gateway session start limits

@@ -29,6 +29,13 @@ BINARY_NAME="warraft-discord-linux"
 # This should match the DISCORD_TOKEN in your systemd service Environment
 DISCORD_TOKEN="your_discord_bot_token_here"
 
+# Discord guild ID for instant command registration (optional)
+# Right-click on server name in Discord (with Developer Mode enabled) and select "Copy Server ID"
+# If set, slash commands will be registered to this specific guild (appears instantly)
+# If empty, commands will be registered globally (can take up to 1 hour to propagate)
+# This should match the DISCORD_GUILD_ID in your systemd service Environment
+DISCORD_GUILD_ID=""
+
 # MongoDB connection settings
 # MongoDB connection URL with authentication
 # Format: mongodb://username:password@host:port/authDatabase

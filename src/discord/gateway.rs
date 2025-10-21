@@ -32,6 +32,12 @@ pub async fn run_gateway(gateway_url: String) -> Result<()> {
 
                         if let Some(sid) = session_id {
                             // RESUME - reconnect with existing session
+                            let _ = crate::db::session_events::SessionEvent::log_resume(
+                                &*state::db().await,
+                                sid.clone(),
+                                sequence
+                            ).await;
+
                             let resume = json!({
                                 "op": Opcode::Resume as u8,
                                 "d": {
@@ -41,13 +47,15 @@ pub async fn run_gateway(gateway_url: String) -> Result<()> {
                                 }
                             });
                             
-                            eprintln!("[GATEWAY] Resuming session {} with seq {:?}", sid, sequence);
-                            
                             write
                                 .send(Message::Text(resume.to_string().into()))
                                 .await?;
                         } else {
                             // IDENTIFY - new session
+                            let _ = crate::db::session_events::SessionEvent::log_identify(
+                                &*state::db().await
+                            ).await;
+
                             let identify = json!({
                                 "op": Opcode::Identify as u8,
                                 "d": {
@@ -60,8 +68,6 @@ pub async fn run_gateway(gateway_url: String) -> Result<()> {
                                     }
                                 }
                             });
-
-                            eprintln!("[GATEWAY] Starting new session (IDENTIFY)");
 
                             write
                                 .send(Message::Text(identify.to_string().into()))
@@ -85,6 +91,9 @@ pub async fn run_gateway(gateway_url: String) -> Result<()> {
                                     if write.send(Message::Text(heartbeat.to_string().into())).await.is_err() {
                                         break;
                                     }
+                                    
+                                    // Log heartbeat to MongoDB
+                                    let _ = state::log_heartbeat().await;
                                 }
                                 Some(msg_result) = read.next() => {
                                     match msg_result {
@@ -99,7 +108,9 @@ pub async fn run_gateway(gateway_url: String) -> Result<()> {
                                                 }
                                                 Opcode::InvalidSession => {
                                                     // Invalid Session - need to re-identify
-                                                    eprintln!("[GATEWAY] Invalid session, clearing state for re-identify");
+                                                    let _ = crate::db::session_events::SessionEvent::log_invalid_session(
+                                                        &*state::db().await
+                                                    ).await;
                                                     state::clear_session().await;
                                                     return Ok(());
                                                 }
@@ -130,13 +141,19 @@ async fn handle_dispatch_event(event: DiscordEvent) -> Result<()> {
         EventType::Ready => {
             if let Some(d) = event.d {
                 if let Some(session_id) = d["session_id"].as_str() {
-                    eprintln!("[GATEWAY] New session established: {}", session_id);
                     state::set_session_id(session_id.to_string()).await;
+                    let _ = crate::db::session_events::SessionEvent::log_ready(
+                        &*state::db().await,
+                        session_id.to_string()
+                    ).await;
                 }
             }
         }
         EventType::Resumed => {
-            eprintln!("[GATEWAY] Session resumed successfully");
+            // Session resumed successfully
+            let _ = crate::db::session_events::SessionEvent::log_resumed(
+                &*state::db().await
+            ).await;
         }
         EventType::InteractionCreate => {
             if let Some(d) = event.d {

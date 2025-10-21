@@ -157,3 +157,19 @@ impl std::fmt::Display for DiscordErrorResponse {
 pub struct ApplicationInfo {
     pub id: String,
 }
+
+// Gateway Bot info with session limits
+#[derive(Debug, Deserialize)]
+pub struct GatewayBotInfo {
+    pub url: String,
+    pub shards: i32,
+    pub session_start_limit: SessionStartLimit,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct SessionStartLimit {
+    pub total: i32,
+    pub remaining: i32,
+    pub reset_after: i64,  // milliseconds
+    pub max_concurrency: i32,
+}
