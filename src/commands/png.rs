@@ -104,7 +104,17 @@ async fn check_bot_permissions(client: &reqwest::Client, token: &str, channel_id
             format!("{}\n{}", header, status.join("\n"))
         }
         Err(e) => {
-            format!("❌ Unable to check permissions: {:?}", e)
+            // Check if error is because bot is not in the server
+            if e.to_string().contains("bot_not_in_server") {
+                let invite_url = state::get_invite_url().await;
+                if !invite_url.is_empty() {
+                    format!("ℹ️ **Permissions:** Bot is not in this server\n\n[Click here to invite the bot]({})", invite_url)
+                } else {
+                    "ℹ️ **Permissions:** Bot needs to be invited to this server".to_string()
+                }
+            } else {
+                "⚠️ Unable to check permissions (you can still use the bot)".to_string()
+            }
         }
     }
 }
@@ -128,6 +138,11 @@ async fn get_channel_permissions(client: &reqwest::Client, token: &str, channel_
         response.headers(),
     ).await;
 
+    // Handle 403 Forbidden - bot is not in this server
+    if response.status() == reqwest::StatusCode::FORBIDDEN {
+        return Err(crate::error::BotError::new("bot_not_in_server"));
+    }
+    
     if !response.status().is_success() {
         return Err(crate::error::BotError::new("channel_fetch_failed")
             .push_str(format!("Status: {}", response.status())));

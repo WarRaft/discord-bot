@@ -23,6 +23,9 @@ async fn register_commands() -> Result<()> {
     println!("[INFO] Getting application ID...");
     let app_id = discord::api::get_application_id(&client, &token).await?;
     println!("[INFO] Application ID: {}", app_id);
+    
+    // Save application ID to state for invite URL generation
+    state::set_application_id(app_id.clone()).await;
 
     println!("[INFO] Registering slash commands...");
     discord::api::register_slash_commands(&client, &token, &app_id).await?;

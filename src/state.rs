@@ -60,6 +60,7 @@ pub(crate) struct BotStateInner {
     session_id: Mutex<Option<String>>,
     db: Arc<mongodb::Database>,
     bot_user_id: Mutex<Option<String>>,
+    application_id: Mutex<Option<String>>,
     // Rate limiter: Discord allows ~50 requests per second globally
     // We use 45/sec to have safety margin
     rate_limiter: Arc<RateLimiter>,
@@ -87,6 +88,7 @@ pub async fn init_bot_state(token: String, mongo_url: &str, mongo_db: &str) -> R
             session_id: Mutex::new(saved_state.session_id),
             db,
             bot_user_id: Mutex::new(saved_state.bot_user_id),
+            application_id: Mutex::new(None),
             rate_limiter: Arc::new(RateLimiter::new(rate_limit)),
         })
     }).await;
@@ -167,6 +169,33 @@ pub async fn set_bot_user_id(user_id: String) {
 pub async fn bot_user_id() -> String {
     let state = bot_state().await;
     state.bot_user_id.lock().await.clone().unwrap_or_default()
+}
+
+pub async fn set_application_id(app_id: String) {
+    let state = bot_state().await;
+    *state.application_id.lock().await = Some(app_id);
+}
+
+pub async fn application_id() -> String {
+    let state = bot_state().await;
+    state.application_id.lock().await.clone().unwrap_or_default()
+}
+
+/// Generate bot invite URL with required permissions
+pub async fn get_invite_url() -> String {
+    let app_id = application_id().await;
+    if app_id.is_empty() {
+        return String::new();
+    }
+    
+    // Permissions: VIEW_CHANNEL (1024) + SEND_MESSAGES (2048) + ATTACH_FILES (32768) + READ_MESSAGE_HISTORY (65536)
+    // Total: 101376
+    let permissions = 0x400 | 0x800 | 0x8000 | 0x10000; // 101376
+    
+    format!(
+        "https://discord.com/api/oauth2/authorize?client_id={}&permissions={}&scope=bot%20applications.commands",
+        app_id, permissions
+    )
 }
 
 /// Get the rate limiter for Discord API requests
