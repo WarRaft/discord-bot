@@ -58,7 +58,6 @@ pub(crate) struct BotStateInner {
     client: Client,
     sequence: Mutex<Option<u64>>,
     session_id: Mutex<Option<String>>,
-    commands_registered: Mutex<bool>,
     db: Arc<mongodb::Database>,
     bot_user_id: Mutex<Option<String>>,
     // Rate limiter: Discord allows ~50 requests per second globally
@@ -86,7 +85,6 @@ pub async fn init_bot_state(token: String, mongo_url: &str, mongo_db: &str) -> R
             client: Client::new(),
             sequence: Mutex::new(saved_state.sequence),
             session_id: Mutex::new(saved_state.session_id),
-            commands_registered: Mutex::new(false),
             db,
             bot_user_id: Mutex::new(saved_state.bot_user_id),
             rate_limiter: Arc::new(RateLimiter::new(rate_limit)),
@@ -142,17 +140,6 @@ async fn save_state() -> Result<()> {
     };
     
     discord_state.save(&state.db).await
-}
-
-pub async fn should_register_commands() -> bool {
-    let state = bot_state().await;
-    let mut registered = state.commands_registered.lock().await;
-    if !*registered {
-        *registered = true;
-        true
-    } else {
-        false
-    }
 }
 
 pub async fn token() -> String {

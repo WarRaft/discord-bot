@@ -115,7 +115,13 @@ pub async fn get_application_id(client: &Client, token: &str) -> Result<String> 
 
 pub async fn register_slash_commands(client: &Client, token: &str, app_id: &str) -> Result<()> {
     let commands = crate::commands::all_commands();
+    
+    println!("[INFO] Preparing to register {} slash commands:", commands.len());
+    for cmd in &commands {
+        println!("[INFO]   - /{}: {}", cmd.name, cmd.description);
+    }
 
+    println!("[INFO] Sending registration request to Discord API...");
     let response = client
         .put(&format!(
             "https://discord.com/api/v10/applications/{}/commands",
@@ -126,6 +132,8 @@ pub async fn register_slash_commands(client: &Client, token: &str, app_id: &str)
         .json(&commands)
         .send()
         .await?;
+
+    println!("[INFO] Discord API response status: {}", response.status());
 
     // Store rate limits
     let _ = crate::db::rate_limits::RateLimit::update_from_headers(
@@ -138,6 +146,8 @@ pub async fn register_slash_commands(client: &Client, token: &str, app_id: &str)
         let status = response.status();
         let error_text = response.text().await.unwrap_or_default();
         
+        println!("[ERROR] Discord API returned error: {} - {}", status, error_text);
+        
         if let Ok(discord_err) = serde_json::from_str::<DiscordErrorResponse>(&error_text) {
             return Err(BotError::new("discord_api_error")
                 .push_str(format!("PUT /applications/{}/commands: {}", app_id, discord_err)));
@@ -145,6 +155,23 @@ pub async fn register_slash_commands(client: &Client, token: &str, app_id: &str)
         
         return Err(BotError::new("http_error")
             .push_str(format!("PUT /applications/{}/commands: {} - {}", app_id, status, error_text)));
+    }
+
+    // Parse response to see what commands were actually registered
+    let response_text = response.text().await.unwrap_or_default();
+    if let Ok(registered_commands) = serde_json::from_str::<Vec<serde_json::Value>>(&response_text) {
+        println!("[INFO] Discord confirmed {} commands registered:", registered_commands.len());
+        for cmd in registered_commands {
+            if let Some(name) = cmd.get("name").and_then(|n| n.as_str()) {
+                if let Some(id) = cmd.get("id").and_then(|i| i.as_str()) {
+                    println!("[INFO]   - /{} (ID: {})", name, id);
+                } else {
+                    println!("[INFO]   - /{}", name);
+                }
+            }
+        }
+    } else {
+        println!("[INFO] Commands registration successful (unable to parse response details)");
     }
 
     Ok(())

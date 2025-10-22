@@ -15,12 +15,21 @@ use error::Result;
 const BLP_WORKER_COUNT: usize = 3;
 
 async fn register_commands() -> Result<()> {
+    println!("[INFO] Starting slash commands registration...");
+    
     let token = state::token().await;
     let client = state::client().await;
+    
+    println!("[INFO] Getting application ID...");
     let app_id = discord::api::get_application_id(&client, &token).await?;
+    println!("[INFO] Application ID: {}", app_id);
 
+    println!("[INFO] Registering slash commands...");
     discord::api::register_slash_commands(&client, &token, &app_id).await?;
+    
+    println!("[INFO] Commands registered successfully! Waiting 2 seconds for Discord to process...");
     tokio::time::sleep(Duration::from_secs(2)).await;
+    println!("[INFO] Commands registration completed!");
     Ok(())
 }
 
@@ -30,13 +39,8 @@ async fn run_bot() -> Result<()> {
     let client = state::client().await;
     let _ = discord::api::get_gateway_bot_info(&client, &token).await;
 
-    // Register slash commands only on first start to avoid rate limiting
-    if state::should_register_commands().await {
-        if let Err(e) = register_commands().await {
-            eprintln!("[ERROR] Failed to register commands:");
-            e.print_tree();
-        }
-    }
+    // Commands are only registered manually via SIGUSR1 signal
+    // No automatic registration on startup to avoid rate limiting
 
     let gateway_url = discord::api::get_gateway_url(&client, &token).await?;
     discord::gateway::run_gateway(gateway_url).await

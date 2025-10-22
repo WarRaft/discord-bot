@@ -3,6 +3,7 @@ use std::sync::Arc;
 use tokio::sync::{OnceCell, watch, Notify};
 use tokio::time::{Duration, sleep};
 use uuid::Uuid;
+use zip::{ZipWriter, write::FileOptions};
 
 use crate::db::blp_queue::{AttachmentItem, BlpQueueItem};
 use crate::error::{BotError, Result};
@@ -167,6 +168,7 @@ async fn process_queue_item(worker_name: &str) -> Result<bool> {
 
 async fn process_attachments(item: &mut BlpQueueItem) -> Result<Vec<(String, Vec<u8>)>> {
     let mut converted_files = Vec::new();
+    let mut filename_counts = std::collections::HashMap::new();
 
     for attachment in &mut item.attachments {
         let result = match item.conversion_type {
@@ -179,15 +181,47 @@ async fn process_attachments(item: &mut BlpQueueItem) -> Result<Vec<(String, Vec
         };
 
         match result {
-            Ok((filename, bytes)) => {
+            Ok((mut filename, bytes)) => {
+                // Handle duplicate filenames
+                let count = filename_counts.entry(filename.clone()).or_insert(0);
+                *count += 1;
+                if *count > 1 {
+                    let (name, ext) = if let Some(dot_pos) = filename.rfind('.') {
+                        (filename[..dot_pos].to_string(), &filename[dot_pos..])
+                    } else {
+                        (filename.clone(), "")
+                    };
+                    filename = format!("{}_{}{}", name, count, ext);
+                }
                 converted_files.push((filename, bytes));
             }
             Err(e) => {
+                // Create error text file instead of failing the whole batch
+                let base_name = attachment.filename.rsplit('.').nth(1)
+                    .map(|s| s.to_string())
+                    .unwrap_or_else(|| attachment.filename.clone());
+                let mut error_filename = format!("{}.error.txt", base_name);
+                
+                // Handle duplicate error filenames too
+                let count = filename_counts.entry(error_filename.clone()).or_insert(0);
+                *count += 1;
+                if *count > 1 {
+                    error_filename = format!("{}.error_{}.txt", base_name, count);
+                }
+                
+                let error_content = format!(
+                    "Error converting file: {}\n\nError details:\n{:?}\n\nTimestamp: {}",
+                    attachment.filename,
+                    e,
+                    chrono::Utc::now().format("%Y-%m-%d %H:%M:%S UTC")
+                );
+                converted_files.push((error_filename, error_content.into_bytes()));
+                
                 eprintln!(
                     "[ERROR] Failed to convert {}: {:?}",
                     attachment.filename, e
                 );
-                return Err(e);
+                // Continue processing other files instead of returning error
             }
         }
     }
@@ -294,6 +328,30 @@ async fn convert_to_png(
     Ok((output_filename, png_bytes))
 }
 
+/// Create ZIP archive from converted files
+fn create_zip_archive(files: &[(String, Vec<u8>)]) -> Result<Vec<u8>> {
+    use std::io::Write;
+    
+    let mut zip_buffer = Vec::new();
+    {
+        let cursor = Cursor::new(&mut zip_buffer);
+        let mut zip = ZipWriter::new(cursor);
+        let options = FileOptions::<()>::default()
+            .compression_method(zip::CompressionMethod::Stored); // No compression for already compressed images
+
+        for (filename, data) in files {
+            zip.start_file(filename, options)
+                .map_err(|e| BotError::new("zip_start_file_error").push_str(e.to_string()))?;
+            zip.write_all(data)
+                .map_err(|e| BotError::new("zip_write_error").push_str(e.to_string()))?;
+        }
+
+        zip.finish()
+            .map_err(|e| BotError::new("zip_finish_error").push_str(e.to_string()))?;
+    }
+    Ok(zip_buffer)
+}
+
 async fn send_response(item: &BlpQueueItem, converted_files: Vec<(String, Vec<u8>)>) -> Result<()> {
     // Acquire rate limit token BEFORE making request
     let limiter = state::rate_limiter().await;
@@ -308,6 +366,20 @@ async fn send_response(item: &BlpQueueItem, converted_files: Vec<(String, Vec<u8
         format!("{:.2}s", duration.num_milliseconds() as f64 / 1000.0)
     } else {
         "unknown".to_string()
+    };
+
+    // Prepare files for sending - either as ZIP or individual files
+    let files_to_send = if item.zip {
+        // Create ZIP archive (even for single files if requested)
+        let zip_data = create_zip_archive(&converted_files)?;
+        let zip_filename = match item.conversion_type {
+            crate::db::blp_queue::ConversionType::ToBLP => "converted_images.blp.zip".to_string(),
+            crate::db::blp_queue::ConversionType::ToPNG => "converted_images.png.zip".to_string(),
+        };
+        vec![(zip_filename, zip_data)]
+    } else {
+        // Send individual files
+        converted_files.clone()
     };
 
     // If we have status_message_id, edit that message with attachments
@@ -325,16 +397,17 @@ async fn send_response(item: &BlpQueueItem, converted_files: Vec<(String, Vec<u8
         
         let payload = serde_json::json!({
             "content": format!(
-                "✅ Converted {} image(s) {}\n⏱️ Completed in {}",
+                "✅ Converted {} image(s) {}{}\n⏱️ Completed in {}",
                 converted_files.len(),
                 format_desc,
+                if item.zip { " (zipped)" } else { "" },
                 conversion_time
             )
         });
         form = form.text("payload_json", payload.to_string());
 
         // Add files from memory
-        for (idx, (filename, file_data)) in converted_files.iter().enumerate() {
+        for (idx, (filename, file_data)) in files_to_send.iter().enumerate() {
             let part = Part::bytes(file_data.clone())
                 .file_name(filename.clone())
                 .mime_str("application/octet-stream")

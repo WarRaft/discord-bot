@@ -4,6 +4,7 @@ use mongodb::bson::{doc, oid::ObjectId, Bson};
 use mongodb::Collection;
 use serde::{Deserialize, Serialize};
 use serde_with::serde_as;
+use strum::{Display, EnumString};
 
 use crate::error::Result;
 
@@ -40,6 +41,9 @@ pub struct BlpQueueItem {
     
     /// BLP quality (1-100, only used for ToBLP conversion)
     pub quality: u8,
+    
+    /// Whether to zip the converted files
+    pub zip: bool,
     
     /// Current status
     pub status: QueueStatus,
@@ -93,10 +97,13 @@ pub enum QueueStatus {
     Failed,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Display, EnumString)]
 #[serde(rename_all = "lowercase")]
+#[strum(serialize_all = "lowercase")]
 pub enum ConversionType {
+    #[strum(serialize = "toblp")]
     ToBLP,   // PNG/JPG → BLP
+    #[strum(serialize = "topng")]
     ToPNG,   // BLP → PNG
 }
 
@@ -114,6 +121,7 @@ impl BlpQueueItem {
         attachments: Vec<AttachmentItem>,
         conversion_type: ConversionType,
         quality: u8,
+        zip: bool,
     ) -> Self {
         Self {
             id: None,
@@ -126,6 +134,7 @@ impl BlpQueueItem {
             attachments,
             conversion_type,
             quality,
+            zip,
             status: QueueStatus::Pending,
             worker_id: None,
             created_at: Utc::now(),
@@ -148,7 +157,7 @@ impl BlpQueueItem {
         let collection: Collection<BlpQueueItem> = db.collection(Self::COLLECTION_NAME);
         
         // Find and update pending item atomically
-        let now = Bson::DateTime(mongodb::bson::DateTime::now());
+        let now = Bson::DateTime(bson::DateTime::now());
         
         let result = collection
             .find_one_and_update(
@@ -174,7 +183,7 @@ impl BlpQueueItem {
     /// Mark item as completed
     pub async fn mark_completed(db: &mongodb::Database, id: ObjectId) -> Result<()> {
         let collection: Collection<BlpQueueItem> = db.collection(Self::COLLECTION_NAME);
-        let now = Bson::DateTime(mongodb::bson::DateTime::now());
+        let now = Bson::DateTime(bson::DateTime::now());
         
         collection
             .update_one(
@@ -194,7 +203,7 @@ impl BlpQueueItem {
     /// Mark item as failed and increment retry count
     pub async fn mark_failed(db: &mongodb::Database, id: ObjectId, error: String) -> Result<()> {
         let collection: Collection<BlpQueueItem> = db.collection(Self::COLLECTION_NAME);
-        let now = Bson::DateTime(mongodb::bson::DateTime::now());
+        let now = Bson::DateTime(bson::DateTime::now());
         
         collection
             .update_one(
@@ -218,7 +227,7 @@ impl BlpQueueItem {
         let collection: Collection<BlpQueueItem> = db.collection(Self::COLLECTION_NAME);
         
         let threshold = Utc::now() - chrono::Duration::minutes(timeout_minutes);
-        let threshold_bson = Bson::DateTime(mongodb::bson::DateTime::from_millis(threshold.timestamp_millis()));
+        let threshold_bson = Bson::DateTime(bson::DateTime::from_millis(threshold.timestamp_millis()));
         
         let result = collection
             .update_many(
@@ -252,6 +261,18 @@ impl BlpQueueItem {
     pub async fn count_processing(db: &mongodb::Database) -> Result<u64> {
         let collection: Collection<BlpQueueItem> = db.collection(Self::COLLECTION_NAME);
         let count = collection.count_documents(doc! { "status": "processing" }).await?;
+        Ok(count)
+    }
+
+    /// Count all items by conversion type (total usage statistics)
+    pub async fn count_total_by_type(db: &mongodb::Database, conversion_type: ConversionType) -> Result<u64> {
+        let collection: Collection<BlpQueueItem> = db.collection(Self::COLLECTION_NAME);
+        
+        let filter = doc! { 
+            "conversion_type": conversion_type.to_string()
+        };
+        
+        let count = collection.count_documents(filter).await?;
         Ok(count)
     }
 }
