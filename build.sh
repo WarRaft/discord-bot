@@ -27,10 +27,10 @@ echo "🧹 Cleaning $DIST_DIR directory..."
 rm -rf "$DIST_DIR"
 mkdir -p "$DIST_DIR"
 
-echo "🐧 Building for Linux (x86_64-unknown-linux-musl)..."
-rustup target add x86_64-unknown-linux-musl &>/dev/null || true
-DISCORD_BOT_TOKEN="$DISCORD_TOKEN" MONGO_URL="$MONGO_URL" MONGO_DB="$MONGO_DB" cargo build --release --target x86_64-unknown-linux-musl
-cp "target/x86_64-unknown-linux-musl/release/$PROJECT_NAME" "$DIST_DIR/$BINARY_NAME"
+echo "🐧 Building for Linux (x86_64-unknown-linux-gnu)..."
+rustup target add x86_64-unknown-linux-gnu &>/dev/null || true
+DISCORD_BOT_TOKEN="$DISCORD_TOKEN" MONGO_URL="$MONGO_URL" MONGO_DB="$MONGO_DB" cargo build --release --target x86_64-unknown-linux-gnu
+cp "target/x86_64-unknown-linux-gnu/release/$PROJECT_NAME" "$DIST_DIR/$BINARY_NAME"
 
 echo ""
 echo "✅ Build complete:"

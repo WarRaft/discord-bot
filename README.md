@@ -7,6 +7,7 @@
 - Direct WebSocket connection to Discord Gateway
 - MongoDB state persistence with session resumption
 - **BLP Image Conversion** - Bidirectional conversion between PNG and BLP formats
+- **Background Removal** - AI-powered background removal using U2-Net model
 - Persistent queue system with event-driven workers
 - Modular slash command system (see `src/commands/`)
 - Auto-reconnect with progressive backoff
@@ -119,10 +120,71 @@ The bot creates and uses these collections:
 - **discord_rate_limits** - HTTP API rate limits per endpoint
 - **discord_session_limits** - Session start limits tracking
 - **discord_command_blp** - BLP conversion queue (pending, processing, completed, failed)
+- **discord_command_png** - PNG conversion queue (pending, processing, completed, failed)
+- **discord_command_rembg** - Background removal queue (pending, processing, completed, failed)
 
 ## Commands
 
 See [src/commands/README.md](src/commands/README.md) for details on adding new commands.
+
+### Download AI Models
+
+Download ONNX Runtime library and models for background removal:
+
+```bash
+./signal-download-models.sh
+```
+
+This sends SIGUSR2 signal to the bot, triggering:
+1. **ONNX Runtime installation** (if not already installed):
+   - Downloads libonnxruntime.so 1.16.0 (~16 MB)
+   - Installs to `/usr/local/lib/`
+   - Updates library cache
+
+2. **Model downloads**:
+   - **u2net.onnx** (~176 MB) - Universal background removal model
+   - **u2net_human_seg.onnx** (~176 MB) - Optimized for portraits
+   - **silueta.onnx** (~43 MB) - Fast and lightweight model
+
+Models are saved to `models/` directory next to the bot binary.
+
+Monitor download progress:
+```bash
+journalctl -u WarRaftDiscord -f
+```
+
+### Background Removal
+
+Remove backgrounds from images using AI:
+
+**Mention command:**
+```
+@Raft rembg              # Default: threshold 60, soft edges
+@Raft rembg 80           # Custom threshold (1-100)
+@Raft rembg binary       # Hard edges (binary mode)
+@Raft rembg mask         # Include alpha mask as separate file
+@Raft rembg 70 binary mask zip   # All options combined
+```
+
+**Slash command:**
+```
+/rembg
+```
+
+**Parameters:**
+- `threshold` (1-100) - Detection sensitivity (default: 60)
+  - Lower = more aggressive removal
+  - Higher = preserve more details
+- `binary` - Hard edges mode (default: soft/feathered edges)
+- `mask` - Include alpha mask as separate PNG file
+- `zip` - Force ZIP archive output (auto for multiple files)
+
+**Features:**
+- Supports PNG, JPEG, WebP, BMP, GIF input
+- Output always in PNG format (with transparency)
+- Three concurrent workers for parallel processing
+- Persistent queue survives service restarts
+- In-memory processing (no temporary files)
 
 ### BLP Image Conversion
 
@@ -153,7 +215,17 @@ Convert images between PNG and Warcraft III BLP formats by mentioning the bot wi
 Trigger command reregistration without restarting the service:
 
 ```bash
-./reregister-commands.sh
+./signal-reregister-commands.sh
 ```
 
 This sends SIGUSR1 signal to the bot, causing immediate command reregistration.
+
+### Download Models
+
+Trigger model download without restarting the service:
+
+```bash
+./signal-download-models.sh
+```
+
+This sends SIGUSR2 signal to the bot to download AI models.

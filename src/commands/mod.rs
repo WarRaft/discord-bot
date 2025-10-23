@@ -1,6 +1,7 @@
 mod ahoy;
 mod blp;
 mod png;
+mod rembg;
 
 use crate::error::Result;
 use crate::types::discord::Interaction;
@@ -29,6 +30,7 @@ pub fn all_commands() -> Vec<SlashCommand> {
         ahoy::Ahoy::definition(),
         blp::Blp::definition(),
         png::Png::definition(),
+        rembg::Rembg::definition(),
     ]
 }
 
@@ -47,6 +49,7 @@ pub async fn handle_interaction(interaction: Interaction) -> Result<()> {
         "ahoy" => ahoy::Ahoy::handle(interaction).await,
         "blp" => blp::Blp::handle(interaction).await,
         "png" => png::Png::handle(interaction).await,
+        "rembg" => rembg::Rembg::handle(interaction).await,
         _ => Ok(()), // Unknown command, ignore
     }
 }

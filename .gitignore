@@ -28,3 +28,7 @@ build/build-info.txt
 # Sensitive build configuration (contains passwords, tokens, etc.)
 build-sensitive.sh
 .env
+
+test_rembg_input/
+test_rembg_output/
+models/

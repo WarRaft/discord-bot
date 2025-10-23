@@ -1,5 +1,5 @@
 use bson::serde_helpers::datetime;
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, TimeZone, Utc};
 use mongodb::{Collection, bson::doc};
 use serde::{Deserialize, Serialize};
 use serde_with::serde_as;
@@ -11,25 +11,26 @@ use crate::error::Result;
 pub struct RateLimit {
     /// Endpoint route (e.g., "/gateway", "/interactions", "/channels/{channel_id}/messages")
     pub route: String,
-    
+
     /// Maximum number of requests allowed in the time window
     pub limit: i32,
-    
+
     /// Number of requests remaining in the current window
     pub remaining: i32,
-    
-    /// Unix timestamp (seconds) when the rate limit resets
-    pub reset: f64,
-    
-    /// Time window duration in seconds
+
+    /// Время, когда лимит сбрасывается
+    #[serde_as(as = "datetime::FromChrono04DateTime")]
+    pub reset: DateTime<Utc>,
+
+    /// Длительность окна (секунды)
     pub reset_after: f64,
-    
+
     /// Bucket identifier (Discord groups endpoints into buckets)
     pub bucket: Option<String>,
-    
+
     /// Whether this is a global rate limit
     pub global: bool,
-    
+
     /// Timestamp when this rate limit was last updated
     #[serde_as(as = "datetime::FromChrono04DateTime")]
     pub updated_at: DateTime<Utc>,
@@ -63,7 +64,9 @@ impl RateLimit {
             .get("x-ratelimit-reset")
             .and_then(|v| v.to_str().ok())
             .and_then(|v| v.parse::<f64>().ok())
-            .unwrap_or(0.0);
+            .map(|ts| Utc.timestamp_opt(ts as i64, 0).single())
+            .flatten()
+            .unwrap_or_else(Utc::now);
 
         let reset_after = headers
             .get("x-ratelimit-reset-after")
@@ -100,10 +103,7 @@ impl RateLimit {
 
         // Upsert by route
         collection
-            .replace_one(
-                doc! { "route": &route },
-                &rate_limit,
-            )
+            .replace_one(doc! { "route": &route }, &rate_limit)
             .upsert(true)
             .await?;
 
@@ -114,10 +114,8 @@ impl RateLimit {
     #[allow(dead_code)]
     pub async fn get(db: &mongodb::Database, route: &str) -> Result<Option<RateLimit>> {
         let collection: Collection<RateLimit> = db.collection(Self::COLLECTION_NAME);
-        
-        let rate_limit = collection
-            .find_one(doc! { "route": route })
-            .await?;
+
+        let rate_limit = collection.find_one(doc! { "route": route }).await?;
 
         Ok(rate_limit)
     }
@@ -130,7 +128,7 @@ impl RateLimit {
         }
 
         // Check if reset time has passed
-        let now = Utc::now().timestamp() as f64;
+        let now = Utc::now();
         now >= self.reset
     }
 
@@ -141,7 +139,8 @@ impl RateLimit {
             return 0.0;
         }
 
-        let now = Utc::now().timestamp() as f64;
-        (self.reset - now).max(0.0)
+        let now = Utc::now();
+        let diff = self.reset.signed_duration_since(now).num_seconds();
+        (diff as f64).max(0.0)
     }
 }

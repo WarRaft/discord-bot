@@ -203,9 +203,15 @@ async fn handle_message(message: Message) -> Result<()> {
         return Ok(());
     }
 
-    // Check if message contains "blp" or "png" command (trim whitespace)
+    // Check if message contains "blp", "png", or "rembg" command (trim whitespace)
     let content_lower = message.content.trim().to_lowercase();
 
+    // Check for rembg command (background removal)
+    if content_lower.contains("rembg") {
+        return handle_rembg_command(message, content_lower).await;
+    }
+
+    // Check for blp/png conversion commands
     let (_command, conversion_type) = if content_lower.contains("blp") {
         ("blp", crate::db::blp_queue::ConversionType::ToBLP)
     } else if content_lower.contains("png") {
@@ -299,7 +305,8 @@ async fn handle_message(message: Message) -> Result<()> {
     queue_item.status_message_id = status_message_id;
 
     let db = state::db().await;
-    let _queue_id = queue_item.insert(&*db).await?;
+    let queue_id = queue_item.insert(&*db).await?;
+    eprintln!("[REMBG][gateway] queued item id: {} for message_id: {} status_message_id: {:?}", queue_id, message.id, queue_item.status_message_id);
 
     // Notify workers that a new task is available
     crate::workers::notify_new_task();
@@ -327,6 +334,156 @@ fn parse_quality_from_content(content: &str) -> Option<u8> {
             if let Ok(q) = num_part.parse::<u8>() {
                 if (1..=100).contains(&q) {
                     return Some(q);
+                }
+            }
+        }
+    }
+
+    None
+}
+
+/// Handle rembg (background removal) command
+async fn handle_rembg_command(message: Message, content_lower: String) -> Result<()> {
+    // Check if there are attachments
+    if message.attachments.is_empty() {
+        return Ok(());
+    }
+
+    // Check if rembg is available
+    if !crate::workers::is_rembg_available() {
+        // Send error message immediately
+        let limiter = state::rate_limiter().await;
+        limiter.acquire().await;
+
+        let client = state::client().await;
+        let token = state::token().await;
+
+        let response = client
+            .post(&format!(
+                "https://discord.com/api/v10/channels/{}/messages",
+                message.channel_id
+            ))
+            .header("Authorization", format!("Bot {}", token))
+            .header("Content-Type", "application/json")
+            .json(&serde_json::json!({
+                "content": "❌ **Background removal is currently unavailable**\n\nONNX Runtime is not installed on the server.\nPlease contact the administrator to run: `./signal-download-models.sh`"
+            }))
+            .send()
+            .await?;
+
+        let _ = crate::db::rate_limits::RateLimit::update_from_headers(
+            &*state::db().await,
+            format!("POST /channels/{}/messages", message.channel_id),
+            response.headers(),
+        )
+        .await;
+
+        return Ok(());
+    }
+
+    // Parse parameters from message
+    let should_zip = content_lower.contains("zip");
+    let threshold = parse_threshold_from_content(&message.content).unwrap_or(60);
+    let binary_mode = content_lower.contains("binary"); // Default is false (soft edges), "binary" enables clean cutout
+    let include_mask = content_lower.contains("mask");
+
+    // Add to queue
+    use crate::db::rembg_queue::{AttachmentItem, RembgQueueItem};
+
+    let attachments: Vec<AttachmentItem> = message
+        .attachments
+        .into_iter()
+        .map(|att| AttachmentItem {
+            url: att.url,
+            filename: att.filename,
+            processed_path: None,
+        })
+        .collect();
+
+    // Send confirmation message FIRST to get message ID
+    // Acquire rate limit token before sending
+    let limiter = state::rate_limiter().await;
+    limiter.acquire().await;
+
+    let client = state::client().await;
+    let token = state::token().await;
+
+    let response = client
+        .post(&format!(
+            "https://discord.com/api/v10/channels/{}/messages",
+            message.channel_id
+        ))
+        .header("Authorization", format!("Bot {}", token))
+        .header("Content-Type", "application/json")
+        .json(&serde_json::json!({
+            "content": format!(
+                "🔄 Processing {} image(s) for background removal...",
+                attachments.len()
+            )
+        }))
+        .send()
+        .await?;
+
+    let _ = crate::db::rate_limits::RateLimit::update_from_headers(
+        &*state::db().await,
+        format!("POST /channels/{}/messages", message.channel_id),
+        response.headers(),
+    )
+    .await;
+
+    let status_message: serde_json::Value = response.json().await?;
+    let status_message_id = status_message["id"].as_str().map(String::from);
+    // Diagnostic log: show status message JSON and parsed id for rembg tasks
+    eprintln!("[REMBG][gateway] status_message response: {}", status_message);
+    eprintln!("[REMBG][gateway] parsed status_message_id: {:?}", status_message_id);
+
+    // Create queue item
+    let message_id = message.id.clone();
+    let mut queue_item = RembgQueueItem::new(
+        message.author.id,
+        message.channel_id,
+        message_id.clone(),
+        message_id, // Use message ID as interaction ID for mention commands
+        String::new(),      // No token for mention commands
+        attachments,
+        threshold,
+        binary_mode,
+        include_mask,
+        should_zip,
+    );
+
+    // Set status_message_id before inserting
+    queue_item.status_message_id = status_message_id;
+
+    let db = state::db().await;
+    let _queue_id = queue_item.insert(&*db).await?;
+
+    // Notify workers that a new task is available
+    crate::workers::notify_rembg_task();
+
+    Ok(())
+}
+
+fn parse_threshold_from_content(content: &str) -> Option<u8> {
+    // Look for "rembg 60" or "rembg60" pattern (threshold 1-100)
+    let words: Vec<&str> = content.split_whitespace().collect();
+
+    for (i, word) in words.iter().enumerate() {
+        if word.to_lowercase() == "rembg" {
+            // Check next word
+            if let Some(next) = words.get(i + 1) {
+                if let Ok(t) = next.parse::<u8>() {
+                    if (1..=100).contains(&t) {
+                        return Some(t);
+                    }
+                }
+            }
+        } else if word.to_lowercase().starts_with("rembg") {
+            // Check if number follows immediately (e.g., "rembg60")
+            let num_part = &word[5..];
+            if let Ok(t) = num_part.parse::<u8>() {
+                if (1..=100).contains(&t) {
+                    return Some(t);
                 }
             }
         }
