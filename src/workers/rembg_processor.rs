@@ -1,5 +1,6 @@
 use blp::core::decode::decode_to_rgba;
 use image::DynamicImage;
+use rembg::RemovalOptions;
 use std::collections::HashMap;
 use std::io::Cursor;
 use std::path::Path;
@@ -119,10 +120,6 @@ async fn process_queue_item(worker_name: &str, rembg: Arc<Mutex<rembg::Rembg>>) 
     };
 
     let item_id = item.id.unwrap();
-    eprintln!(
-        "[REMBG][{}] picked item db_id: {} message_id: {} status_message_id: {:?}",
-        worker_name, item_id, item.message_id, item.status_message_id
-    );
 
     // Process attachments with timing
     let start_time = Instant::now();
@@ -174,7 +171,15 @@ async fn process_attachments(
         let bytes = response.bytes().await?;
 
         // Try to process the image
-        match process_single_image(&bytes, rembg.clone(), item.threshold, item.binary_mode).await {
+        match process_single_image(
+            &bytes,
+            rembg.clone(),
+            &RemovalOptions::new()
+                .with_threshold(item.threshold)
+                .with_binary_mode(item.binary_mode),
+        )
+        .await
+        {
             Ok((image_data, mask_data)) => {
                 // Add processed image
                 let new_filename = change_extension(&attachment.filename, "png");
@@ -225,26 +230,12 @@ async fn process_attachments(
 async fn process_single_image(
     image_bytes: &[u8],
     rembg: Arc<Mutex<rembg::Rembg>>,
-    threshold: u8,
-    binary_mode: bool,
+    options: &RemovalOptions,
 ) -> Result<(Vec<u8>, Vec<u8>)> {
     // Load image using blp::core::decode::decode_to_rgba (supports more formats)
     let img = decode_to_rgba(image_bytes)
         .map_err(|e| BotError::new("image_load_failed").push_str(format!("{:?}", e)))?;
-
-    // Convert threshold from 1-100 to 0.0-1.0
-    let threshold_f32 = (threshold as f32) / 100.0;
-
-    eprintln!(
-        "[REMBG] threshold: {} binary_mode: {}",
-        threshold_f32, binary_mode
-    );
-
-    // Process with rembg
-    let options = rembg::RemovalOptions::new()
-        .with_threshold(threshold_f32)
-        .with_binary_mode(binary_mode);
-
+    
     let mut rembg_guard = rembg.lock().await;
     let result = rembg_guard
         .remove_background(img, options)
@@ -288,10 +279,6 @@ async fn send_response_editable(
     );
 
     if let Some(status_msg_id) = &item.status_message_id {
-        eprintln!(
-            "[REMBG][worker] status_message_id present: {}. Will attempt PATCH.",
-            status_msg_id
-        );
         // PATCH (edit) the original status message
         use reqwest::multipart::{Form, Part};
         let mut form = Form::new();
@@ -328,7 +315,6 @@ async fn send_response_editable(
             .send()
             .await?;
         let status = response.status();
-        eprintln!("[REMBG][worker] PATCH response status: {}", status);
         if !status.is_success() {
             let error_text = response.text().await.unwrap_or_default();
             eprintln!(
@@ -343,7 +329,6 @@ async fn send_response_editable(
             )));
         }
     } else {
-        eprintln!("[REMBG][worker] no status_message_id; will POST new message.");
         // Fallback: send new message if status_message_id not available
         use reqwest::multipart::{Form, Part};
         let mut form = Form::new();
@@ -354,7 +339,6 @@ async fn send_response_editable(
             }
         });
         form = form.text("payload_json", payload.to_string());
-        eprintln!("[REMBG][worker] POST payload: {}", payload.to_string());
 
         if should_zip {
             let zip_data = create_zip_archive(&results)?;
@@ -386,7 +370,6 @@ async fn send_response_editable(
             .send()
             .await?;
         let status = response.status();
-        eprintln!("[REMBG][worker] POST response status: {}", status);
         if !status.is_success() {
             let error_text = response.text().await.unwrap_or_default();
             eprintln!(

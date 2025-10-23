@@ -48,18 +48,26 @@ impl Command for Blp {
         };
 
         let info_text = format!(
-            "🔄 **BLP Image Conversion**\n\n\
+            "🧩 **BLP Image Conversion**\n\n\
 **Usage:**\n\
-• Mention the bot with image attachments: `@Raft blp [quality] [zip]`\n\
-• Quality: 1-100 (default: 80, higher = better quality)\n\
-• Add `zip` to receive files in a ZIP archive\n\n\
+• Mention the bot with image attachments: `@Raft blp [quality] [options]`\n\n\
+**Parameters:**\n\
+• `quality` — JPEG quality **(1–100, default: 80)**\n  \
+  Higher values → better quality, larger file\n  \
+  Lower values → smaller file, possible artifacts\n\
+• `zip` — Bundle all converted images into a ZIP archive\n\n\
+**Aliases / Flags:**\n\
+• Quality can be set as:\n  \
+  `blp90`, `-q 90`, `--quality 90`, or `--quality=90`\n\
+• ZIP can be toggled as:\n  \
+  `zip`, `-z`, `--zip`, or `zip=true`\n\n\
 **Examples:**\n\
-• `@Raft blp` - Convert with default quality (80)\n\
-• `@Raft blp 95` - Convert with quality 95\n\
-• `@Raft blp 90 zip` - Convert with quality 90 and ZIP the results\n\
-• `@Raft blp zip` - Convert with default quality and ZIP the results\n\n\
-**File size limit:** 25MB per file\n\
-**Multiple files:** Yes, attach multiple images in one message\n\n\
+• `@Raft blp` — Convert with default quality (80)\n\
+• `@Raft blp 95` — Convert with quality 95\n\
+• `@Raft blp90 -z` — Convert with quality 90 and ZIP results\n\
+• `@Raft blp --quality=70 zip` — Convert with quality 70, ZIP archive output\n\n\
+**File size limit:** 25 MB per file\n\
+**Multiple files:** Yes — attach several images in one message\n\n\
 {}\n\n\
 **Bot Permissions Status:**\n\
 {}",
@@ -129,7 +137,10 @@ async fn check_bot_permissions(client: &reqwest::Client, token: &str, channel_id
             if e.to_string().contains("bot_not_in_server") {
                 let invite_url = state::get_invite_url().await;
                 if !invite_url.is_empty() {
-                    format!("ℹ️ **Permissions:** Bot is not in this server\n\n[Click here to invite the bot]({})", invite_url)
+                    format!(
+                        "ℹ️ **Permissions:** Bot is not in this server\n\n[Click here to invite the bot]({})",
+                        invite_url
+                    )
                 } else {
                     "ℹ️ **Permissions:** Bot needs to be invited to this server".to_string()
                 }
@@ -172,7 +183,7 @@ async fn get_channel_permissions(
     if response.status() == reqwest::StatusCode::FORBIDDEN {
         return Err(crate::error::BotError::new("bot_not_in_server"));
     }
-    
+
     if !response.status().is_success() {
         return Err(crate::error::BotError::new("channel_fetch_failed")
             .push_str(format!("Status: {}", response.status())));

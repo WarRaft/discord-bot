@@ -17,7 +17,7 @@ static TASK_NOTIFY: OnceCell<Arc<Notify>> = OnceCell::const_new();
 
 /// Notify workers that a new task is available
 /// Uses Notify which is more efficient than channels for wake-ups
-pub fn notify_new_task() {
+pub fn notify_blp_task() {
     if let Some(notify) = TASK_NOTIFY.get() {
         notify.notify_waiters(); // Wake ALL waiting workers
     }

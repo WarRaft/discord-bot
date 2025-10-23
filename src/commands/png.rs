@@ -29,34 +29,47 @@ impl Command for Png {
 
         // Get queue statistics for PNG conversion
         let queue_info = match crate::db::blp_queue::BlpQueueItem::count_total_by_type(
-            &db, 
-            crate::db::blp_queue::ConversionType::ToPNG
-        ).await {
+            &db,
+            crate::db::blp_queue::ConversionType::ToPNG,
+        )
+        .await
+        {
             Ok(count) => {
                 if count > 0 {
-                    format!("📊 **Usage Statistics:** {} total PNG conversions processed", count)
+                    format!(
+                        "📊 **Usage Statistics:** {} total PNG conversions processed",
+                        count
+                    )
                 } else {
                     "📊 **Usage Statistics:** No PNG conversions yet".to_string()
                 }
             }
-            Err(_) => "📊 **Usage Statistics:** Unable to check statistics".to_string()
+            Err(_) => "📊 **Usage Statistics:** Unable to check statistics".to_string(),
         };
 
-        let info_text = format!("🖼️ **PNG Image Conversion**\n\n\
+        let info_text = format!(
+            "🖼️ **PNG Image Conversion**\n\n\
 **Usage:**\n\
-• Mention the bot with BLP attachments: `@Raft png [zip]`\n\
-• Add `zip` to receive files in a ZIP archive\n\n\
+• Mention the bot with BLP attachments: `@Raft png [options]`\n\n\
+**Parameters:**\n\
+• `zip` — Bundle all converted images into a ZIP archive\n\n\
+**Aliases / Flags:**\n\
+• ZIP can also be written as:\n  \
+  `-z`, `--zip`, or `zip=true`\n\n\
 **Examples:**\n\
-• `@Raft png` - Convert BLP files to PNG\n\
-• `@Raft png zip` - Convert BLP files to PNG and ZIP the results\n\n\
-**File size limit:** 25MB per file\n\
-**Multiple files:** Yes, attach multiple BLP images in one message\n\
-**Quality:** PNG conversion preserves original quality\n\n\
-**Note:** This converts BLP texture files used in Warcraft III back to standard PNG images.\n\n\
+• `@Raft png` — Convert attached BLP files to PNG\n\
+• `@Raft png zip` — Convert and ZIP the results\n\
+• `@Raft png -z` — Same as above, using short flag\n\n\
+**File size limit:** 25 MB per file\n\
+**Multiple files:** Yes — attach multiple BLP images in one message\n\
+**Quality:** PNG conversion preserves original image quality\n\n\
+**Note:** Converts Warcraft III BLP textures back to standard PNG images.\n\n\
 {}\n\n\
 **Bot Permissions Status:**\n\
-{}", queue_info, permissions_info);
-        
+{}",
+            queue_info, permissions_info
+        );
+
         api::respond_to_interaction(
             &client,
             &token,
@@ -82,25 +95,37 @@ async fn check_bot_permissions(client: &reqwest::Client, token: &str, channel_id
     match get_channel_permissions(client, token, channel_id, &bot_user_id).await {
         Ok(permissions) => {
             let mut status = Vec::new();
-            
+
             // Check required permissions (bitwise flags)
             let view_channel = permissions & 0x400 != 0; // VIEW_CHANNEL
             let send_messages = permissions & 0x800 != 0; // SEND_MESSAGES  
             let attach_files = permissions & 0x8000 != 0; // ATTACH_FILES
             let read_history = permissions & 0x10000 != 0; // READ_MESSAGE_HISTORY
-            
-            status.push(format!("• View Channel: {}", if view_channel { "✅" } else { "❌" }));
-            status.push(format!("• Send Messages: {}", if send_messages { "✅" } else { "❌" }));
-            status.push(format!("• Attach Files: {}", if attach_files { "✅" } else { "❌" }));
-            status.push(format!("• Read Message History: {}", if read_history { "✅" } else { "❌" }));
-            
+
+            status.push(format!(
+                "• View Channel: {}",
+                if view_channel { "✅" } else { "❌" }
+            ));
+            status.push(format!(
+                "• Send Messages: {}",
+                if send_messages { "✅" } else { "❌" }
+            ));
+            status.push(format!(
+                "• Attach Files: {}",
+                if attach_files { "✅" } else { "❌" }
+            ));
+            status.push(format!(
+                "• Read Message History: {}",
+                if read_history { "✅" } else { "❌" }
+            ));
+
             let all_ok = view_channel && send_messages && attach_files && read_history;
-            let header = if all_ok { 
-                "✅ All required permissions available" 
-            } else { 
-                "⚠️ Some permissions missing" 
+            let header = if all_ok {
+                "✅ All required permissions available"
+            } else {
+                "⚠️ Some permissions missing"
             };
-            
+
             format!("{}\n{}", header, status.join("\n"))
         }
         Err(e) => {
@@ -108,7 +133,10 @@ async fn check_bot_permissions(client: &reqwest::Client, token: &str, channel_id
             if e.to_string().contains("bot_not_in_server") {
                 let invite_url = state::get_invite_url().await;
                 if !invite_url.is_empty() {
-                    format!("ℹ️ **Permissions:** Bot is not in this server\n\n[Click here to invite the bot]({})", invite_url)
+                    format!(
+                        "ℹ️ **Permissions:** Bot is not in this server\n\n[Click here to invite the bot]({})",
+                        invite_url
+                    )
                 } else {
                     "ℹ️ **Permissions:** Bot needs to be invited to this server".to_string()
                 }
@@ -120,13 +148,21 @@ async fn check_bot_permissions(client: &reqwest::Client, token: &str, channel_id
 }
 
 /// Get channel permissions for bot user
-async fn get_channel_permissions(client: &reqwest::Client, token: &str, channel_id: &str, _user_id: &str) -> Result<u64> {
+async fn get_channel_permissions(
+    client: &reqwest::Client,
+    token: &str,
+    channel_id: &str,
+    _user_id: &str,
+) -> Result<u64> {
     // Apply rate limiting before Discord API request
     let limiter = crate::state::rate_limiter().await;
     limiter.acquire().await;
-    
+
     let response = client
-        .get(&format!("https://discord.com/api/v10/channels/{}", channel_id))
+        .get(&format!(
+            "https://discord.com/api/v10/channels/{}",
+            channel_id
+        ))
         .header("Authorization", format!("Bot {}", token))
         .send()
         .await?;
@@ -136,20 +172,21 @@ async fn get_channel_permissions(client: &reqwest::Client, token: &str, channel_
         &*crate::state::db().await,
         format!("/channels/{}", channel_id),
         response.headers(),
-    ).await;
+    )
+    .await;
 
     // Handle 403 Forbidden - bot is not in this server
     if response.status() == reqwest::StatusCode::FORBIDDEN {
         return Err(crate::error::BotError::new("bot_not_in_server"));
     }
-    
+
     if !response.status().is_success() {
         return Err(crate::error::BotError::new("channel_fetch_failed")
             .push_str(format!("Status: {}", response.status())));
     }
 
     let channel_data: serde_json::Value = response.json().await?;
-    
+
     // For DMs, assume we have all permissions
     if channel_data["type"].as_u64() == Some(1) {
         return Ok(0x8000 | 0x800 | 0x400 | 0x10000); // Basic DM permissions
@@ -159,7 +196,7 @@ async fn get_channel_permissions(client: &reqwest::Client, token: &str, channel_
     // - Guild member roles
     // - Channel permission overwrites
     // This is complex, so for now return a basic check
-    
+
     // TODO: Implement full permission calculation
     // For now, assume we have permissions (this should be improved)
     Ok(0x8000 | 0x800 | 0x400 | 0x10000)
