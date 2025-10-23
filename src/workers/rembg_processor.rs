@@ -235,7 +235,7 @@ async fn process_single_image(
     // Load image using blp::core::decode::decode_to_rgba (supports more formats)
     let img = decode_to_rgba(image_bytes)
         .map_err(|e| BotError::new("image_load_failed").push_str(format!("{:?}", e)))?;
-    
+
     let mut rembg_guard = rembg.lock().await;
     let result = rembg_guard
         .remove_background(img, options)
@@ -267,7 +267,7 @@ async fn send_response_editable(
 ) -> Result<()> {
     let client = state::client().await;
     let token = state::token().await;
-    let should_zip = item.zip || results.len() > 1;
+    let should_zip = item.zip;
     let limiter = state::rate_limiter().await;
     limiter.acquire().await;
 
