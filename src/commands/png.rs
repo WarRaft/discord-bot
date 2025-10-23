@@ -53,17 +53,13 @@ impl Command for Png {
 • Mention the bot with BLP attachments: `@Raft png [options]`\n\n\
 **Parameters:**\n\
 • `zip` — Bundle all converted images into a ZIP archive\n\n\
-**Aliases / Flags:**\n\
-• ZIP can also be written as:\n  \
-  `-z`, `--zip`, or `zip=true`\n\n\
 **Examples:**\n\
 • `@Raft png` — Convert attached BLP files to PNG\n\
-• `@Raft png zip` — Convert and ZIP the results\n\
-• `@Raft png -z` — Same as above, using short flag\n\n\
-**File size limit:** 25 MB per file\n\
-**Multiple files:** Yes — attach multiple BLP images in one message\n\
-**Quality:** PNG conversion preserves original image quality\n\n\
-**Note:** Converts Warcraft III BLP textures back to standard PNG images.\n\n\
+• `@Raft png zip` — Convert and ZIP all converted images\n\n\
+**File Size Limit:** 25 MB per file\n\
+**Multiple Files:** Supported — attach several BLP images in one message\n\
+**Quality:** PNG conversion preserves original image quality and alpha transparency\n\n\
+**Note:** Converts Warcraft III `.blp` textures back into standard PNG images for editing or viewing.\n\n\
 {}\n\n\
 **Bot Permissions Status:**\n\
 {}",

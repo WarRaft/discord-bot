@@ -53,21 +53,17 @@ impl Command for Blp {
 • Mention the bot with image attachments: `@Raft blp [quality] [options]`\n\n\
 **Parameters:**\n\
 • `quality` — JPEG quality **(1–100, default: 80)**\n  \
-  Higher values → better quality, larger file\n  \
-  Lower values → smaller file, possible artifacts\n\
+  Higher values → better quality, larger file size\n  \
+  Lower values → smaller file size, possible artifacts\n\
 • `zip` — Bundle all converted images into a ZIP archive\n\n\
-**Aliases / Flags:**\n\
-• Quality can be set as:\n  \
-  `blp90`, `-q 90`, `--quality 90`, or `--quality=90`\n\
-• ZIP can be toggled as:\n  \
-  `zip`, `-z`, `--zip`, or `zip=true`\n\n\
 **Examples:**\n\
 • `@Raft blp` — Convert with default quality (80)\n\
-• `@Raft blp 95` — Convert with quality 95\n\
-• `@Raft blp90 -z` — Convert with quality 90 and ZIP results\n\
-• `@Raft blp --quality=70 zip` — Convert with quality 70, ZIP archive output\n\n\
-**File size limit:** 25 MB per file\n\
-**Multiple files:** Yes — attach several images in one message\n\n\
+• `@Raft blp 95` — Convert with higher quality (95)\n\
+• `@Raft blp 60 zip` — Convert with quality 60 and ZIP all results\n\n\
+**File Size Limit:** 25 MB per file\n\
+**Multiple Files:** Supported — attach several images in one message\n\
+**Output Format:** Warcraft III `.blp` texture\n\
+**Input Formats:** PNG, JPEG, WebP, BMP, GIF\n\n\
 {}\n\n\
 **Bot Permissions Status:**\n\
 {}",

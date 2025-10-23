@@ -22,4 +22,3 @@ tokio-tungstenite = { version = "0.28.0", features = ["rustls-tls-webpki-roots"]
 url = "2.5.7"
 uuid = { version = "1.18.1", features = ["v4"] }
 zip = "6.0.0"
-regex = "1.12.2"

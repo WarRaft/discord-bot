@@ -56,26 +56,26 @@ Contact the administrator to run: `./signal-download-models.sh`\n\n"
 ✂️ **Background Removal**\n\n\
 **Usage:**\n\
 • Mention the bot with image attachments: `@Raft rembg [threshold] [options]`\n\
-• You can also use `@Raft bg` as a shorter alias.\n\n\
+• You can also use the shorter alias: `@Raft bg`\n\n\
 **Parameters:**\n\
 • `threshold` — Sensitivity **(0–255, default: 160)**\n  \
-  Lower values → keep more background\n  \
-  Higher values → cleaner, stronger cutout\n\
-• `binary` — Force clean edges instead of soft alpha blending\n\
-• `mask` — Include the alpha mask as a separate image\n\
-• `zip` — Bundle all results into a ZIP archive\n\n\
+  Lower values → softer edges, more background kept\n  \
+  Higher values → stronger removal, cleaner cutout\n\
+• `binary` — Force clean hard edges instead of smooth alpha blending\n\
+• `mask` — Include the extracted alpha mask as a separate image\n\
+• `zip` — Combine all results into a ZIP archive\n\n\
 **Examples:**\n\
-• `@Raft bg` — Remove background with soft edges (default)\n\
-• `@Raft rembg 160` — Stronger background removal\n\
-• `@Raft bg binary` — Sharp binary cutout\n\
-• `@Raft rembg mask` — Output both result and mask\n\
+• `@Raft bg` — Default soft background removal\n\
+• `@Raft rembg 120` — Moderate, stronger background removal\n\
+• `@Raft bg binary` — Binary hard-edged cutout\n\
+• `@Raft rembg mask` — Output both processed image and mask\n\
 • `@Raft bg 200 binary mask zip` — All options combined\n\n\
 **Supported Formats:**\n\
 • **Input:** PNG, JPEG, WebP, BMP, GIF\n\
 • **Output:** PNG with transparency\n\n\
 **Features:**\n\
-• AI-powered background removal using U²-Net model\n\
-• Preserves fine details and alpha channel\n\
+• AI-powered background removal using the U²-Net model\n\
+• Preserves fine details and transparency\n\
 • Supports batch processing of multiple images\n\n\
 {}\n\n\
 {}",
