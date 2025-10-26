@@ -5,7 +5,7 @@ use tokio::sync::{Mutex, OnceCell};
 use tokio::time::Instant;
 
 use crate::db::{mongo::mongo_pool, state::DiscordState};
-use crate::error::Result;
+use crate::error::BotError;
 
 static BOT_STATE: OnceCell<Arc<BotStateInner>> = OnceCell::const_new();
 
@@ -73,7 +73,7 @@ pub(crate) async fn bot_state() -> Arc<BotStateInner> {
         .clone()
 }
 
-pub async fn init_bot_state(token: String, mongo_url: &str, mongo_db: &str) -> Result<()> {
+pub async fn init_bot_state(token: String, mongo_url: &str, mongo_db: &str) -> Result<(), BotError> {
     let db = mongo_pool(mongo_url, mongo_db).await;
     let saved_state = DiscordState::load(&db).await?;
     
@@ -127,7 +127,7 @@ pub async fn clear_session() {
     let _ = save_state().await;
 }
 
-async fn save_state() -> Result<()> {
+async fn save_state() -> Result<(), BotError> {
     let state = bot_state().await;
     let session_id = state.session_id.lock().await.clone();
     let sequence = *state.sequence.lock().await;
@@ -152,7 +152,7 @@ pub async fn client() -> Client {
     bot_state().await.client.clone()
 }
 
-pub async fn log_heartbeat() -> Result<i64> {
+pub async fn log_heartbeat() -> Result<i64, BotError> {
     let state = bot_state().await;
     crate::db::heartbeat::Heartbeat::increment(&state.db).await
 }

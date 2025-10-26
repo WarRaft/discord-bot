@@ -6,7 +6,7 @@ use uuid::Uuid;
 use zip::{ZipWriter, write::FileOptions};
 
 use crate::db::blp_queue::{AttachmentItem, BlpQueueItem};
-use crate::error::{BotError, Result};
+use crate::error::{BotError};
 use crate::state;
 
 /// Global sender for controlling worker count
@@ -132,7 +132,7 @@ async fn worker_loop(worker_id: usize, notify: Arc<Notify>) {
     }
 }
 
-async fn process_queue_item(worker_name: &str) -> Result<bool> {
+async fn process_queue_item(worker_name: &str) -> Result<bool, BotError> {
     let db = state::db().await;
 
     // Try to claim next pending item
@@ -166,7 +166,7 @@ async fn process_queue_item(worker_name: &str) -> Result<bool> {
     Ok(true) // Task was processed
 }
 
-async fn process_attachments(item: &mut BlpQueueItem) -> Result<Vec<(String, Vec<u8>)>> {
+async fn process_attachments(item: &mut BlpQueueItem) -> Result<Vec<(String, Vec<u8>)>, BotError> {
     let mut converted_files = Vec::new();
     let mut filename_counts = std::collections::HashMap::new();
 
@@ -232,7 +232,7 @@ async fn process_attachments(item: &mut BlpQueueItem) -> Result<Vec<(String, Vec
 async fn convert_to_blp(
     attachment: &AttachmentItem,
     quality: u8,
-) -> Result<(String, Vec<u8>)> {
+) -> Result<(String, Vec<u8>), BotError> {
     // Download image
     let client = state::client().await;
     let response = client.get(&attachment.url).send().await?;
@@ -279,7 +279,7 @@ async fn convert_to_blp(
 
 async fn convert_to_png(
     attachment: &AttachmentItem,
-) -> Result<(String, Vec<u8>)> {
+) -> Result<(String, Vec<u8>), BotError> {
     // Download BLP file
     let client = state::client().await;
     let response = client.get(&attachment.url).send().await?;
@@ -329,7 +329,7 @@ async fn convert_to_png(
 }
 
 /// Create ZIP archive from converted files
-fn create_zip_archive(files: &[(String, Vec<u8>)]) -> Result<Vec<u8>> {
+fn create_zip_archive(files: &[(String, Vec<u8>)]) -> Result<Vec<u8>, BotError> {
     use std::io::Write;
     
     let mut zip_buffer = Vec::new();
@@ -352,7 +352,7 @@ fn create_zip_archive(files: &[(String, Vec<u8>)]) -> Result<Vec<u8>> {
     Ok(zip_buffer)
 }
 
-async fn send_response(item: &BlpQueueItem, converted_files: Vec<(String, Vec<u8>)>) -> Result<()> {
+async fn send_response(item: &BlpQueueItem, converted_files: Vec<(String, Vec<u8>)>) -> Result<(), BotError> {
     // Acquire rate limit token BEFORE making request
     let limiter = state::rate_limiter().await;
     limiter.acquire().await;

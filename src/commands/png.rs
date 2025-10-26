@@ -1,6 +1,6 @@
 use crate::commands::{Command, SlashCommand};
 use crate::discord::api;
-use crate::error::Result;
+use crate::error::BotError;
 use crate::state;
 use crate::types::discord::Interaction;
 
@@ -15,7 +15,7 @@ impl Command for Png {
         }
     }
 
-    async fn handle(interaction: Interaction) -> Result<()> {
+    async fn handle(interaction: Interaction) -> Result<(), BotError> {
         let client = state::client().await;
         let token = state::token().await;
         let db = state::db().await;
@@ -149,7 +149,7 @@ async fn get_channel_permissions(
     token: &str,
     channel_id: &str,
     _user_id: &str,
-) -> Result<u64> {
+) -> Result<u64, BotError> {
     // Apply rate limiting before Discord API request
     let limiter = crate::state::rate_limiter().await;
     limiter.acquire().await;

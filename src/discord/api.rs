@@ -1,9 +1,9 @@
 use reqwest::Client;
-use crate::error::{BotError, Result};
+use crate::error::{BotError};
 use crate::types::discord::*;
 use crate::state;
 
-pub async fn get_gateway_bot_info(client: &Client, token: &str) -> Result<GatewayBotInfo> {
+pub async fn get_gateway_bot_info(client: &Client, token: &str) -> Result<GatewayBotInfo, BotError> {
     let response = client
         .get("https://discord.com/api/v10/gateway/bot")
         .header("Authorization", format!("Bot {}", token))
@@ -45,7 +45,7 @@ pub async fn get_gateway_bot_info(client: &Client, token: &str) -> Result<Gatewa
     Ok(bot_info)
 }
 
-pub async fn get_gateway_url(client: &Client, token: &str) -> Result<String> {
+pub async fn get_gateway_url(client: &Client, token: &str) -> Result<String, BotError> {
     let response = client
         .get("https://discord.com/api/v10/gateway")
         .header("Authorization", format!("Bot {}", token))
@@ -82,7 +82,7 @@ pub async fn get_gateway_url(client: &Client, token: &str) -> Result<String> {
     Ok(url)
 }
 
-pub async fn get_application_id(client: &Client, token: &str) -> Result<String> {
+pub async fn get_application_id(client: &Client, token: &str) -> Result<String, BotError> {
     let response = client
         .get("https://discord.com/api/v10/oauth2/applications/@me")
         .header("Authorization", format!("Bot {}", token))
@@ -113,7 +113,7 @@ pub async fn get_application_id(client: &Client, token: &str) -> Result<String> 
     Ok(app_info.id)
 }
 
-pub async fn register_slash_commands(client: &Client, token: &str, app_id: &str) -> Result<()> {
+pub async fn register_slash_commands(client: &Client, token: &str, app_id: &str) -> Result<(), BotError> {
     let commands = crate::commands::all_commands();
     
     println!("[INFO] Preparing to register {} slash commands:", commands.len());
@@ -183,7 +183,7 @@ pub async fn respond_to_interaction(
     interaction_id: &str,
     interaction_token: &str,
     content: String,
-) -> Result<()> {
+) -> Result<(), BotError> {
     let response_data = InteractionResponse {
         response_type: 4,
         data: Some(InteractionResponseData { content }),

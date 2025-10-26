@@ -3,8 +3,7 @@ use chrono::{DateTime, Utc};
 use mongodb::{Collection, bson::doc};
 use serde::{Deserialize, Serialize};
 use serde_with::serde_as;
-
-use crate::error::Result;
+use crate::error::BotError;
 
 #[serde_as]
 #[derive(Debug, Serialize, Deserialize)]
@@ -21,7 +20,7 @@ pub struct SessionEvent {
 impl SessionEvent {
     const COLLECTION_NAME: &'static str = "discord_session_events";
 
-    pub async fn log_identify(db: &mongodb::Database) -> Result<()> {
+    pub async fn log_identify(db: &mongodb::Database) -> Result<(), BotError> {
         let collection: Collection<SessionEvent> = db.collection(Self::COLLECTION_NAME);
 
         let event = SessionEvent {
@@ -39,7 +38,7 @@ impl SessionEvent {
         db: &mongodb::Database,
         session_id: String,
         sequence: Option<u64>,
-    ) -> Result<()> {
+    ) -> Result<(), BotError> {
         let collection: Collection<SessionEvent> = db.collection(Self::COLLECTION_NAME);
 
         let event = SessionEvent {
@@ -53,7 +52,7 @@ impl SessionEvent {
         Ok(())
     }
 
-    pub async fn log_resumed(db: &mongodb::Database) -> Result<()> {
+    pub async fn log_resumed(db: &mongodb::Database) -> Result<(), BotError> {
         let collection: Collection<SessionEvent> = db.collection(Self::COLLECTION_NAME);
 
         let event = SessionEvent {
@@ -67,7 +66,7 @@ impl SessionEvent {
         Ok(())
     }
 
-    pub async fn log_ready(db: &mongodb::Database, session_id: String) -> Result<()> {
+    pub async fn log_ready(db: &mongodb::Database, session_id: String) -> Result<(), BotError> {
         let collection: Collection<SessionEvent> = db.collection(Self::COLLECTION_NAME);
 
         let event = SessionEvent {
@@ -81,7 +80,7 @@ impl SessionEvent {
         Ok(())
     }
 
-    pub async fn log_invalid_session(db: &mongodb::Database) -> Result<()> {
+    pub async fn log_invalid_session(db: &mongodb::Database) -> Result<(), BotError> {
         let collection: Collection<SessionEvent> = db.collection(Self::COLLECTION_NAME);
 
         let event = SessionEvent {

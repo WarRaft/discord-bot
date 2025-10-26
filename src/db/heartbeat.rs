@@ -4,7 +4,7 @@ use mongodb::{Collection, bson::doc, options::ReplaceOptions};
 use serde::{Deserialize, Serialize};
 use serde_with::serde_as;
 
-use crate::error::Result;
+use crate::error::BotError;
 
 #[serde_as]
 #[derive(Debug, Serialize, Deserialize)]
@@ -20,9 +20,9 @@ impl Heartbeat {
     const COLLECTION_NAME: &'static str = "discord_heartbeat";
     const HEARTBEAT_ID: &'static str = "bot_heartbeat";
 
-    pub async fn increment(db: &mongodb::Database) -> Result<i64> {
+    pub async fn increment(db: &mongodb::Database) -> Result<i64, BotError> {
         let collection: Collection<Heartbeat> = db.collection(Self::COLLECTION_NAME);
-        
+
         // Load current heartbeat
         let current = collection
             .find_one(doc! { "_id": Self::HEARTBEAT_ID })
@@ -37,7 +37,7 @@ impl Heartbeat {
         };
 
         let options = ReplaceOptions::builder().upsert(true).build();
-        
+
         collection
             .replace_one(doc! { "_id": Self::HEARTBEAT_ID }, heartbeat)
             .with_options(options)

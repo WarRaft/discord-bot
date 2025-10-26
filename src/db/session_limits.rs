@@ -3,8 +3,7 @@ use chrono::{DateTime, Utc};
 use mongodb::{Collection, bson::doc};
 use serde::{Deserialize, Serialize};
 use serde_with::serde_as;
-
-use crate::error::Result;
+use crate::error::BotError;
 
 #[serde_as]
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -41,7 +40,7 @@ impl SessionLimit {
         reset_after: i64,
         max_concurrency: i32,
         shards: i32,
-    ) -> Result<()> {
+    ) -> Result<(), BotError> {
         let collection: Collection<SessionLimit> = db.collection(Self::COLLECTION_NAME);
 
         let session_limit = SessionLimit {
@@ -63,7 +62,7 @@ impl SessionLimit {
 
     /// Get current session limit information
     #[allow(dead_code)]
-    pub async fn get(db: &mongodb::Database) -> Result<Option<SessionLimit>> {
+    pub async fn get(db: &mongodb::Database) -> Result<Option<SessionLimit>, BotError> {
         let collection: Collection<SessionLimit> = db.collection(Self::COLLECTION_NAME);
         
         let limit = collection

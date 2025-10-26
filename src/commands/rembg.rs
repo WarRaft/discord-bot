@@ -1,6 +1,6 @@
 use crate::commands::{Command, SlashCommand};
 use crate::discord::api;
-use crate::error::Result;
+use crate::error::BotError;
 use crate::state;
 use crate::types::discord::Interaction;
 
@@ -15,7 +15,7 @@ impl Command for Rembg {
         }
     }
 
-    async fn handle(interaction: Interaction) -> Result<()> {
+    async fn handle(interaction: Interaction) -> Result<(), BotError> {
         let client = state::client().await;
         let token = state::token().await;
         let db = state::db().await;
@@ -70,9 +70,6 @@ Contact the administrator to run: `./signal-download-models.sh`\n\n"
 • `@Raft bg binary` — Binary hard-edged cutout\n\
 • `@Raft rembg mask` — Output both processed image and mask\n\
 • `@Raft bg 200 binary mask zip` — All options combined\n\n\
-**Supported Formats:**\n\
-• **Input:** PNG, JPEG, WebP, BMP, GIF\n\
-• **Output:** PNG with transparency\n\n\
 **Features:**\n\
 • AI-powered background removal using the U²-Net model\n\
 • Preserves fine details and transparency\n\
@@ -165,7 +162,7 @@ async fn get_channel_permissions(
     token: &str,
     channel_id: &str,
     _user_id: &str,
-) -> Result<u64> {
+) -> Result<u64, BotError> {
     // Apply rate limiting before Discord API request
     let limiter = crate::state::rate_limiter().await;
     limiter.acquire().await;

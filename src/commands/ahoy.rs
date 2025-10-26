@@ -1,6 +1,6 @@
 use crate::commands::{Command, SlashCommand};
 use crate::discord::api;
-use crate::error::Result;
+use crate::error::BotError;
 use crate::state;
 use crate::types::discord::Interaction;
 
@@ -15,7 +15,7 @@ impl Command for Ahoy {
         }
     }
 
-    async fn handle(interaction: Interaction) -> Result<()> {
+    async fn handle(interaction: Interaction) -> Result<(), BotError> {
         let client = state::client().await;
         let token = state::token().await;
 

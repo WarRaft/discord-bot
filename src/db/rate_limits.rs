@@ -3,8 +3,7 @@ use chrono::{DateTime, TimeZone, Utc};
 use mongodb::{Collection, bson::doc};
 use serde::{Deserialize, Serialize};
 use serde_with::serde_as;
-
-use crate::error::Result;
+use crate::error::BotError;
 
 #[serde_as]
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -44,7 +43,7 @@ impl RateLimit {
         db: &mongodb::Database,
         route: String,
         headers: &reqwest::header::HeaderMap,
-    ) -> Result<()> {
+    ) -> Result<(), BotError> {
         let collection: Collection<RateLimit> = db.collection(Self::COLLECTION_NAME);
 
         // Parse rate limit headers
@@ -112,7 +111,7 @@ impl RateLimit {
 
     /// Get current rate limit for a route
     #[allow(dead_code)]
-    pub async fn get(db: &mongodb::Database, route: &str) -> Result<Option<RateLimit>> {
+    pub async fn get(db: &mongodb::Database, route: &str) -> Result<Option<RateLimit>, BotError> {
         let collection: Collection<RateLimit> = db.collection(Self::COLLECTION_NAME);
 
         let rate_limit = collection.find_one(doc! { "route": route }).await?;

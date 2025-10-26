@@ -3,7 +3,7 @@ mod blp;
 mod png;
 mod rembg;
 
-use crate::error::Result;
+use crate::error::{BotError};
 use crate::types::discord::Interaction;
 use serde::Serialize;
 
@@ -21,7 +21,7 @@ pub trait Command {
     fn definition() -> SlashCommand;
     
     /// Handle command execution
-    fn handle(interaction: Interaction) -> impl std::future::Future<Output = Result<()>> + Send;
+    fn handle(interaction: Interaction) -> impl std::future::Future<Output = Result<(), BotError>> + Send;
 }
 
 /// Get all registered commands for Discord API registration
@@ -35,7 +35,7 @@ pub fn all_commands() -> Vec<SlashCommand> {
 }
 
 /// Route interaction to appropriate command handler
-pub async fn handle_interaction(interaction: Interaction) -> Result<()> {
+pub async fn handle_interaction(interaction: Interaction) -> Result<(), BotError> {
     if interaction.interaction_type != 2 {
         // Not an application command
         return Ok(());

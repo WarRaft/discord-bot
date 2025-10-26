@@ -1,6 +1,9 @@
 use blp::core::decode::decode_to_rgba;
-use image::DynamicImage;
-use rembg::RemovalOptions;
+use image::{DynamicImage, ImageFormat, RgbImage, RgbaImage};
+use once_cell::sync::Lazy;
+use rembg_rs::manager::ModelManager;
+use rembg_rs::options::{RemovalOptions, RemovalOptionsBuilder};
+use rembg_rs::rembg::rembg;
 use std::collections::HashMap;
 use std::io::Cursor;
 use std::path::Path;
@@ -8,12 +11,12 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 use std::time::Instant;
-use tokio::sync::{Mutex, Notify, OnceCell};
+use tokio::sync::{Notify, OnceCell};
 use zip::CompressionMethod;
 use zip::write::FileOptions;
 
 use crate::db::rembg_queue::RembgQueueItem;
-use crate::error::{BotError, Result};
+use crate::error::BotError;
 use crate::state;
 
 /// Global notifier for new tasks (like BLP worker pool)
@@ -37,12 +40,12 @@ pub fn notify_rembg_task() {
 
 /// Worker main loop - processes queue items continuously
 /// Returns normally only when it should shut down gracefully
-async fn worker_loop(worker_id: usize, notify: Arc<Notify>, rembg: Arc<Mutex<rembg::Rembg>>) {
+async fn worker_loop(worker_id: usize, notify: Arc<Notify>) {
     let worker_name = format!("rembg-worker-{}", worker_id);
 
     loop {
         // Try to process a task
-        match process_queue_item(&worker_name, rembg.clone()).await {
+        match process_queue_item(&worker_name).await {
             Ok(true) => {
                 // Task was processed, immediately try to get another one
                 continue;
@@ -61,15 +64,8 @@ async fn worker_loop(worker_id: usize, notify: Arc<Notify>, rembg: Arc<Mutex<rem
 }
 
 /// Start worker threads for processing rembg queue
-pub fn start_rembg_workers(rembg: Option<Arc<Mutex<rembg::Rembg>>>, worker_count: usize) {
-    if rembg.is_none() {
-        eprintln!("[WARN] Rembg workers disabled - ONNX Runtime not available");
-        REMBG_AVAILABLE.store(false, Ordering::Relaxed);
-        return;
-    }
-
+pub fn start_rembg_workers(worker_count: usize) {
     REMBG_AVAILABLE.store(true, Ordering::Relaxed);
-    let rembg = rembg.unwrap();
 
     // Create notification primitive and store globally so notify_rembg_task can wake workers
     let notify = Arc::new(Notify::new());
@@ -77,40 +73,21 @@ pub fn start_rembg_workers(rembg: Option<Arc<Mutex<rembg::Rembg>>>, worker_count
 
     for i in 0..worker_count {
         let worker_index = i + 1; // 1-based id like blp
-        let rembg_clone = Arc::clone(&rembg);
         let notify_clone = Arc::clone(&notify);
-
         tokio::spawn(async move {
-            worker_loop(worker_index, notify_clone, rembg_clone).await;
+            worker_loop(worker_index, notify_clone).await;
         });
     }
 }
 
-/// Initialize rembg instance (call once at startup)
-/// Returns None if ONNX Runtime is not available (not a fatal error)
-pub async fn init_rembg() -> Result<Option<Arc<Mutex<rembg::Rembg>>>> {
-    let model_path = Path::new("models/u2net.onnx");
+pub static MODEL_MANAGER: Lazy<Arc<ModelManager>> = Lazy::new(|| {
+    let path = Path::new("models/u2net.onnx");
+    let mgr = ModelManager::from_file(path)
+        .unwrap_or_else(|e| panic!("❌ Failed to initialize model manager: {}", e));
+    Arc::new(mgr)
+});
 
-    if !model_path.exists() {
-        eprintln!("[WARN] Rembg model not found: {:?}", model_path);
-        eprintln!("[WARN] Run ./signal-download-models.sh to download models");
-        eprintln!("[WARN] Rembg functionality will be disabled");
-        return Ok(None);
-    }
-
-    match rembg::Rembg::new(model_path) {
-        Ok(rembg) => Ok(Some(Arc::new(Mutex::new(rembg)))),
-        Err(e) => {
-            eprintln!("[WARN] Failed to initialize rembg: {}", e);
-            eprintln!("[WARN] This usually means ONNX Runtime is not installed");
-            eprintln!("[WARN] Run ./signal-download-models.sh to install ONNX Runtime");
-            eprintln!("[WARN] Rembg functionality will be disabled");
-            Ok(None)
-        }
-    }
-}
-
-async fn process_queue_item(worker_name: &str, rembg: Arc<Mutex<rembg::Rembg>>) -> Result<bool> {
+async fn process_queue_item(worker_name: &str) -> Result<bool, BotError> {
     let db = state::db().await;
 
     // Try to get next pending item and mark as processing
@@ -123,7 +100,7 @@ async fn process_queue_item(worker_name: &str, rembg: Arc<Mutex<rembg::Rembg>>) 
 
     // Process attachments with timing
     let start_time = Instant::now();
-    match process_attachments(&item, rembg.clone()).await {
+    match process_attachments(&item).await {
         Ok(results) => {
             let duration = start_time.elapsed();
             // Mark as completed only after successful send
@@ -158,10 +135,7 @@ struct ProcessedAttachment {
 }
 
 /// Process all attachments
-async fn process_attachments(
-    item: &RembgQueueItem,
-    rembg: Arc<Mutex<rembg::Rembg>>,
-) -> Result<Vec<ProcessedAttachment>> {
+async fn process_attachments(item: &RembgQueueItem) -> Result<Vec<ProcessedAttachment>, BotError> {
     let client = state::client().await;
     let mut results = Vec::new();
 
@@ -173,10 +147,11 @@ async fn process_attachments(
         // Try to process the image
         match process_single_image(
             &bytes,
-            rembg.clone(),
-            &RemovalOptions::new()
-                .with_threshold(item.threshold)
-                .with_binary_mode(item.binary_mode),
+            &RemovalOptionsBuilder::default()
+                .threshold(item.threshold)
+                .binary(item.binary_mode)
+                .build()
+                .unwrap(),
         )
         .await
         {
@@ -227,36 +202,40 @@ async fn process_attachments(
 }
 
 /// Process a single image with rembg
-async fn process_single_image(
+pub async fn process_single_image(
     image_bytes: &[u8],
-    rembg: Arc<Mutex<rembg::Rembg>>,
     options: &RemovalOptions,
-) -> Result<(Vec<u8>, Vec<u8>)> {
-    // Load image using blp::core::decode::decode_to_rgba (supports more formats)
-    let img = decode_to_rgba(image_bytes)
-        .map_err(|e| BotError::new("image_load_failed").push_str(format!("{:?}", e)))?;
+) -> Result<(Vec<u8>, Vec<u8>), BotError> {
+    // Decode input to RGBA image
+    let img = decode_to_rgba(image_bytes)?;
 
-    let mut rembg_guard = rembg.lock().await;
-    let result = rembg_guard
-        .remove_background(img, options)
-        .map_err(|e| BotError::new("rembg_processing_failed").push_str(format!("{:?}", e)))?;
-    drop(rembg_guard);
+    // Get global model manager
+    let manager = Arc::clone(&MODEL_MANAGER);
 
-    // Convert processed image to PNG bytes
-    let mut image_bytes = Vec::new();
-    let output_img = DynamicImage::ImageRgba8(result.image().clone());
-    output_img
-        .write_to(&mut Cursor::new(&mut image_bytes), image::ImageFormat::Png)
-        .map_err(|e| BotError::new("png_encode_failed").push_str(format!("{:?}", e)))?;
+    // Run background removal
+    let result = rembg(&*manager, img, options)?;
 
-    // Convert mask to PNG bytes
-    let mut mask_bytes = Vec::new();
-    let mask_img = DynamicImage::ImageLuma8(result.mask().clone());
-    mask_img
-        .write_to(&mut Cursor::new(&mut mask_bytes), image::ImageFormat::Png)
-        .map_err(|e| BotError::new("mask_encode_failed").push_str(format!("{:?}", e)))?;
+    // Extract images
+    let img: &RgbaImage = result.image();
+    let mask_img: &RgbImage = result.mask();
 
-    Ok((image_bytes, mask_bytes))
+    // Encode result to PNG bytes
+    let mut buf_image = Vec::new();
+    let mut buf_mask = Vec::new();
+
+    // Rgba → PNG
+    {
+        let dyn_img = DynamicImage::ImageRgba8(img.clone());
+        dyn_img.write_to(&mut Cursor::new(&mut buf_image), ImageFormat::Png)?;
+    }
+
+    // Mask → PNG
+    {
+        let dyn_mask = DynamicImage::ImageRgb8(mask_img.clone());
+        dyn_mask.write_to(&mut Cursor::new(&mut buf_mask), ImageFormat::Png)?;
+    }
+
+    Ok((buf_image, buf_mask))
 }
 
 /// Send processed images to Discord (edit status message if possible)
@@ -264,7 +243,7 @@ async fn send_response_editable(
     item: &RembgQueueItem,
     results: Vec<ProcessedAttachment>,
     duration: Duration,
-) -> Result<()> {
+) -> Result<(), BotError> {
     let client = state::client().await;
     let token = state::token().await;
     let should_zip = item.zip;
@@ -388,7 +367,7 @@ async fn send_response_editable(
 }
 
 /// Create ZIP archive from processed attachments
-fn create_zip_archive(results: &[ProcessedAttachment]) -> Result<Vec<u8>> {
+fn create_zip_archive(results: &[ProcessedAttachment]) -> Result<Vec<u8>, BotError> {
     let mut zip_buffer = Cursor::new(Vec::new());
     let mut zip = zip::ZipWriter::new(&mut zip_buffer);
 

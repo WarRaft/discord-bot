@@ -5,6 +5,7 @@ use serde_json::json;
 
 use crate::discord::send_message::{MessagePayload, MessageReference, send_message};
 use serde::Serialize;
+use crate::error::BotError;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub enum CommandKind {
@@ -76,7 +77,7 @@ pub fn parse_command_args(content: &str, _bot_id: &str) -> Option<CommandArgs> {
     Some(args)
 }
 
-pub async fn handle_message(message: Message) -> crate::error::Result<()> {
+pub async fn handle_message(message: Message) -> Result<(), BotError> {
     if message.author.bot.unwrap_or(false) {
         return Ok(());
     }
@@ -102,7 +103,7 @@ async fn handle_blp_conversion(
     message: Message,
     conversion_type: ConversionType,
     args: CommandArgs,
-) -> crate::error::Result<()> {
+) -> Result<(), BotError> {
     // Check if there are attachments
     if message.attachments.is_empty() {
         return Ok(());
@@ -191,7 +192,7 @@ async fn handle_blp_conversion(
 }
 
 /// Handle rembg (background removal) command
-async fn handle_rembg_pipeline(message: Message, arg: &CommandArgs) -> crate::error::Result<()> {
+async fn handle_rembg_pipeline(message: Message, arg: &CommandArgs) -> Result<(), BotError> {
     // Check if there are attachments
     if message.attachments.is_empty() {
         return Ok(());

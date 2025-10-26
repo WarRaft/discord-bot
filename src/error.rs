@@ -46,7 +46,7 @@ impl BotError {
         self.causes.push(Cause::Any(cause));
         self
     }
-    
+
     #[inline]
     #[allow(dead_code)]
     pub fn push_str(mut self, message: String) -> Self {
@@ -72,9 +72,13 @@ impl BotError {
     fn print_causes(&self, prefix: &str, _is_last: bool) {
         for (i, cause) in self.causes.iter().enumerate() {
             let is_last_cause = i == self.causes.len() - 1;
-            let branch = if is_last_cause { "└── " } else { "├── " };
+            let branch = if is_last_cause {
+                "└── "
+            } else {
+                "├── "
+            };
             let extension = if is_last_cause { "    " } else { "│   " };
-            
+
             match cause {
                 Cause::Any(e) => {
                     eprintln!("{}{}[{}:{}] {}", prefix, branch, e.file, e.line, e.key);
@@ -82,13 +86,19 @@ impl BotError {
                 }
                 Cause::Std(e) => {
                     eprintln!("{}{}{}", prefix, branch, e);
-                    
+
                     // Print nested sources
                     let mut source = e.source();
                     let mut depth = 0;
                     while let Some(err) = source {
                         let sub_branch = "    ↳ ";
-                        eprintln!("{}{}{}{}", prefix, extension, "  ".repeat(depth), sub_branch);
+                        eprintln!(
+                            "{}{}{}{}",
+                            prefix,
+                            extension,
+                            "  ".repeat(depth),
+                            sub_branch
+                        );
                         eprintln!("{}{}{}  {}", prefix, extension, "  ".repeat(depth + 1), err);
                         source = err.source();
                         depth += 1;
@@ -168,6 +178,27 @@ impl From<mongodb::error::Error> for BotError {
     }
 }
 
+impl From<blp::error::error::BlpError> for BotError {
+    #[track_caller]
+    fn from(e: blp::error::error::BlpError) -> Self {
+        BotError::new("blp").push_std(e)
+    }
+}
+
+impl From<rembg_rs::error::RembgError> for BotError {
+    #[track_caller]
+    fn from(e: rembg_rs::error::RembgError) -> Self {
+        BotError::new("rembg").push_std(e)
+    }
+}
+
+impl From<image::ImageError> for BotError {
+    #[track_caller]
+    fn from(e: image::ImageError) -> Self {
+        BotError::new("rembg").push_std(e)
+    }
+}
+
 impl From<String> for BotError {
     #[track_caller]
     fn from(s: String) -> Self {
@@ -181,5 +212,3 @@ impl From<&str> for BotError {
         BotError::new("str_error").push_std(std::io::Error::new(std::io::ErrorKind::Other, s))
     }
 }
-
-pub type Result<T> = std::result::Result<T, BotError>;

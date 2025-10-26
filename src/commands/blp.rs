@@ -1,6 +1,6 @@
 use crate::commands::{Command, SlashCommand};
 use crate::discord::api;
-use crate::error::Result;
+use crate::error::BotError;
 use crate::state;
 use crate::types::discord::Interaction;
 
@@ -15,7 +15,7 @@ impl Command for Blp {
         }
     }
 
-    async fn handle(interaction: Interaction) -> Result<()> {
+    async fn handle(interaction: Interaction) -> Result<(), BotError> {
         let client = state::client().await;
         let token = state::token().await;
         let db = state::db().await;
@@ -153,9 +153,9 @@ async fn get_channel_permissions(
     token: &str,
     channel_id: &str,
     _user_id: &str,
-) -> Result<u64> {
+) -> Result<u64, BotError> {
     // Apply rate limiting before Discord API request
-    let limiter = crate::state::rate_limiter().await;
+    let limiter = state::rate_limiter().await;
     limiter.acquire().await;
 
     let response = client
@@ -169,7 +169,7 @@ async fn get_channel_permissions(
 
     // Store rate limits from response headers
     let _ = crate::db::rate_limits::RateLimit::update_from_headers(
-        &*crate::state::db().await,
+        &*state::db().await,
         format!("/channels/{}", channel_id),
         response.headers(),
     )
@@ -177,11 +177,11 @@ async fn get_channel_permissions(
 
     // Handle 403 Forbidden - bot is not in this server
     if response.status() == reqwest::StatusCode::FORBIDDEN {
-        return Err(crate::error::BotError::new("bot_not_in_server"));
+        return Err(BotError::new("bot_not_in_server"));
     }
 
     if !response.status().is_success() {
-        return Err(crate::error::BotError::new("channel_fetch_failed")
+        return Err(BotError::new("channel_fetch_failed")
             .push_str(format!("Status: {}", response.status())));
     }
 

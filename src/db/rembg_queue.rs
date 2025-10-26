@@ -4,8 +4,7 @@ use mongodb::Collection;
 use mongodb::bson::{doc, oid::ObjectId};
 use serde::{Deserialize, Serialize};
 use serde_with::serde_as;
-
-use crate::error::Result;
+use crate::error::BotError;
 
 #[serde_as]
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -141,7 +140,7 @@ impl RembgQueueItem {
     }
 
     /// Insert into queue
-    pub async fn insert(&self, db: &mongodb::Database) -> Result<ObjectId> {
+    pub async fn insert(&self, db: &mongodb::Database) -> Result<ObjectId, BotError> {
         let collection: Collection<RembgQueueItem> = db.collection(Self::COLLECTION_NAME);
         let result = collection.insert_one(self).await?;
         Ok(result.inserted_id.as_object_id().unwrap())
@@ -151,7 +150,7 @@ impl RembgQueueItem {
     pub async fn get_next_pending(
         db: &mongodb::Database,
         worker_id: String,
-    ) -> Result<Option<RembgQueueItem>> {
+    ) -> Result<Option<RembgQueueItem>, BotError> {
         let collection: Collection<RembgQueueItem> = db.collection(Self::COLLECTION_NAME);
 
         let filter = doc! {
@@ -178,7 +177,7 @@ impl RembgQueueItem {
     }
 
     /// Mark as completed
-    pub async fn mark_completed(db: &mongodb::Database, id: &ObjectId) -> Result<()> {
+    pub async fn mark_completed(db: &mongodb::Database, id: &ObjectId) -> Result<(), BotError> {
         let collection: Collection<RembgQueueItem> = db.collection(Self::COLLECTION_NAME);
 
         collection
@@ -197,7 +196,7 @@ impl RembgQueueItem {
     }
 
     /// Mark as failed
-    pub async fn mark_failed(db: &mongodb::Database, id: &ObjectId, error: String) -> Result<()> {
+    pub async fn mark_failed(db: &mongodb::Database, id: &ObjectId, error: String) -> Result<(), BotError> {
         let collection: Collection<RembgQueueItem> = db.collection(Self::COLLECTION_NAME);
 
         collection
@@ -218,7 +217,7 @@ impl RembgQueueItem {
     }
 
     /// Count total number of rembg tasks
-    pub async fn count_total(db: &mongodb::Database) -> Result<u64> {
+    pub async fn count_total(db: &mongodb::Database) -> Result<u64, BotError> {
         let collection: Collection<RembgQueueItem> = db.collection(Self::COLLECTION_NAME);
         let count = collection.count_documents(doc! {}).await?;
         Ok(count)

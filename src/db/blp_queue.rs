@@ -5,8 +5,7 @@ use mongodb::Collection;
 use serde::{Deserialize, Serialize};
 use serde_with::serde_as;
 use strum::{Display, EnumString};
-
-use crate::error::Result;
+use crate::error::BotError;
 
 #[serde_as]
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -146,14 +145,14 @@ impl BlpQueueItem {
     }
 
     /// Insert new item into queue
-    pub async fn insert(&self, db: &mongodb::Database) -> Result<ObjectId> {
+    pub async fn insert(&self, db: &mongodb::Database) -> Result<ObjectId, BotError> {
         let collection: Collection<BlpQueueItem> = db.collection(Self::COLLECTION_NAME);
         let result = collection.insert_one(self).await?;
         Ok(result.inserted_id.as_object_id().unwrap())
     }
 
     /// Get next pending item and mark as processing
-    pub async fn claim_next(db: &mongodb::Database, worker_id: String) -> Result<Option<BlpQueueItem>> {
+    pub async fn claim_next(db: &mongodb::Database, worker_id: String) -> Result<Option<BlpQueueItem>, BotError> {
         let collection: Collection<BlpQueueItem> = db.collection(Self::COLLECTION_NAME);
         
         // Find and update pending item atomically
@@ -181,7 +180,7 @@ impl BlpQueueItem {
     }
 
     /// Mark item as completed
-    pub async fn mark_completed(db: &mongodb::Database, id: ObjectId) -> Result<()> {
+    pub async fn mark_completed(db: &mongodb::Database, id: ObjectId) -> Result<(), BotError> {
         let collection: Collection<BlpQueueItem> = db.collection(Self::COLLECTION_NAME);
         let now = Bson::DateTime(bson::DateTime::now());
         
@@ -201,7 +200,7 @@ impl BlpQueueItem {
     }
 
     /// Mark item as failed and increment retry count
-    pub async fn mark_failed(db: &mongodb::Database, id: ObjectId, error: String) -> Result<()> {
+    pub async fn mark_failed(db: &mongodb::Database, id: ObjectId, error: String) -> Result<(), BotError> {
         let collection: Collection<BlpQueueItem> = db.collection(Self::COLLECTION_NAME);
         let now = Bson::DateTime(bson::DateTime::now());
         
@@ -223,7 +222,7 @@ impl BlpQueueItem {
     }
 
     /// Reset stuck processing items (e.g., after service restart)
-    pub async fn reset_stuck_items(db: &mongodb::Database, timeout_minutes: i64) -> Result<u64> {
+    pub async fn reset_stuck_items(db: &mongodb::Database, timeout_minutes: i64) -> Result<u64, BotError> {
         let collection: Collection<BlpQueueItem> = db.collection(Self::COLLECTION_NAME);
         
         let threshold = Utc::now() - chrono::Duration::minutes(timeout_minutes);
@@ -250,7 +249,7 @@ impl BlpQueueItem {
 
     /// Count pending items
     #[allow(dead_code)]
-    pub async fn count_pending(db: &mongodb::Database) -> Result<u64> {
+    pub async fn count_pending(db: &mongodb::Database) -> Result<u64, BotError> {
         let collection: Collection<BlpQueueItem> = db.collection(Self::COLLECTION_NAME);
         let count = collection.count_documents(doc! { "status": "pending" }).await?;
         Ok(count)
@@ -258,14 +257,14 @@ impl BlpQueueItem {
 
     /// Count processing items
     #[allow(dead_code)]
-    pub async fn count_processing(db: &mongodb::Database) -> Result<u64> {
+    pub async fn count_processing(db: &mongodb::Database) -> Result<u64, BotError> {
         let collection: Collection<BlpQueueItem> = db.collection(Self::COLLECTION_NAME);
         let count = collection.count_documents(doc! { "status": "processing" }).await?;
         Ok(count)
     }
 
     /// Count all items by conversion type (total usage statistics)
-    pub async fn count_total_by_type(db: &mongodb::Database, conversion_type: ConversionType) -> Result<u64> {
+    pub async fn count_total_by_type(db: &mongodb::Database, conversion_type: ConversionType) -> Result<u64, BotError> {
         let collection: Collection<BlpQueueItem> = db.collection(Self::COLLECTION_NAME);
         
         let filter = doc! { 
