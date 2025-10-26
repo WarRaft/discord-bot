@@ -1,10 +1,12 @@
+use crate::discord::message::message::Attachment;
+use crate::error::BotError;
+use crate::workers::queue::QueueStatus;
 use bson::serde_helpers::datetime;
 use chrono::{DateTime, Utc};
 use mongodb::Collection;
 use mongodb::bson::{doc, oid::ObjectId};
 use serde::{Deserialize, Serialize};
 use serde_with::serde_as;
-use crate::error::BotError;
 
 #[serde_as]
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -22,8 +24,7 @@ pub struct RembgQueueItem {
     pub message_id: String,
 
     /// Status message ID (for editing progress updates)
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub status_message_id: Option<String>,
+    pub status_message_id: String,
 
     /// Interaction ID for response
     pub interaction_id: String,
@@ -32,7 +33,7 @@ pub struct RembgQueueItem {
     pub interaction_token: String,
 
     /// List of attachment URLs to process
-    pub attachments: Vec<AttachmentItem>,
+    pub attachments: Vec<Attachment>,
 
     /// Threshold for background removal (1-100, default 60)
     pub threshold: u8,
@@ -76,28 +77,6 @@ pub struct RembgQueueItem {
     pub retry_count: u32,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct AttachmentItem {
-    /// Original URL
-    pub url: String,
-
-    /// Original filename
-    pub filename: String,
-
-    /// Processed file path (if completed)
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub processed_path: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(rename_all = "lowercase")]
-pub enum QueueStatus {
-    Pending,
-    Processing,
-    Completed,
-    Failed,
-}
-
 impl RembgQueueItem {
     const COLLECTION_NAME: &'static str = "discord_command_rembg";
     const MAX_RETRIES: u32 = 3;
@@ -109,8 +88,8 @@ impl RembgQueueItem {
         message_id: String,
         interaction_id: String,
         interaction_token: String,
-        status_message_id: Option<String>,
-        attachments: Vec<AttachmentItem>,
+        status_message_id: String,
+        attachments: Vec<Attachment>,
         threshold: u8,
         binary_mode: bool,
         include_mask: bool,
@@ -196,7 +175,11 @@ impl RembgQueueItem {
     }
 
     /// Mark as failed
-    pub async fn mark_failed(db: &mongodb::Database, id: &ObjectId, error: String) -> Result<(), BotError> {
+    pub async fn mark_failed(
+        db: &mongodb::Database,
+        id: &ObjectId,
+        error: String,
+    ) -> Result<(), BotError> {
         let collection: Collection<RembgQueueItem> = db.collection(Self::COLLECTION_NAME);
 
         collection

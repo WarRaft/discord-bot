@@ -1,16 +1,14 @@
 use std::io::Cursor;
 use std::sync::Arc;
-use tokio::sync::{OnceCell, watch, Notify};
+use tokio::sync::{Notify, OnceCell};
 use tokio::time::{Duration, sleep};
 use uuid::Uuid;
 use zip::{ZipWriter, write::FileOptions};
 
-use crate::db::blp_queue::{AttachmentItem, BlpQueueItem};
-use crate::error::{BotError};
+use crate::db::blp_queue::BlpQueueItem;
+use crate::discord::message::message::Attachment;
+use crate::error::BotError;
 use crate::state;
-
-/// Global sender for controlling worker count
-static WORKER_SCALE: OnceCell<watch::Sender<usize>> = OnceCell::const_new();
 
 /// Global notifier for new tasks (efficient, doesn't spam)
 static TASK_NOTIFY: OnceCell<Arc<Notify>> = OnceCell::const_new();
@@ -26,83 +24,14 @@ pub fn notify_blp_task() {
 /// Start BLP worker pool supervisor with 3 workers by default
 /// The supervisor maintains the specified number of workers and allows dynamic scaling
 pub fn start_blp_workers(worker_count: usize) {
-    // Create a channel to control worker count
-    let (tx, rx) = watch::channel(worker_count);
-
-    // Create notification primitive
     let notify = Arc::new(Notify::new());
-
-    // Store the senders globally
-    let _ = WORKER_SCALE.set(tx);
     let _ = TASK_NOTIFY.set(notify.clone());
 
-    // Spawn the supervisor
-    tokio::spawn(async move {
-        supervise_workers(rx, notify).await;
-    });
-}
-
-/// Scale the number of workers at runtime
-/// Returns true if scaling was successful, false if workers not initialized
-#[allow(dead_code)]
-pub fn scale_workers(new_count: usize) -> bool {
-    if let Some(tx) = WORKER_SCALE.get() {
-        tx.send(new_count).is_ok()
-    } else {
-        false
-    }
-}
-
-/// Supervisor that maintains the target number of workers
-async fn supervise_workers(mut worker_count_rx: watch::Receiver<usize>, notify: Arc<Notify>) {
-    let mut handles = Vec::new();
-    let mut current_count = *worker_count_rx.borrow();
-
-    // Start initial workers
-    for worker_id in 0..current_count {
-        let notify_clone = notify.clone();
-        let handle = tokio::spawn(worker_loop(worker_id, notify_clone));
-        handles.push((worker_id, handle));
-    }
-
-    loop {
-        tokio::select! {
-            // Check if worker count changed
-            Ok(()) = worker_count_rx.changed() => {
-                let new_count = *worker_count_rx.borrow();
-                if new_count != current_count {
-                    if new_count > current_count {
-                        // Add workers
-                        for worker_id in current_count..new_count {
-                            let notify_clone = notify.clone();
-                            let handle = tokio::spawn(worker_loop(worker_id, notify_clone));
-                            handles.push((worker_id, handle));
-                        }
-                    } else {
-                        // Remove workers (they will finish their current task and exit)
-                        handles.truncate(new_count);
-                    }
-
-                    current_count = new_count;
-                }
-            }
-
-            // Check for finished workers and restart them
-            _ = sleep(Duration::from_secs(1)) => {
-                let mut i = 0;
-                while i < handles.len() {
-                    if handles[i].1.is_finished() {
-                        let (worker_id, _) = handles.remove(i);
-                        eprintln!("[ERROR] Worker {} died, restarting...", worker_id);
-                        let notify_clone = notify.clone();
-                        let handle = tokio::spawn(worker_loop(worker_id, notify_clone));
-                        handles.push((worker_id, handle));
-                    } else {
-                        i += 1;
-                    }
-                }
-            }
-        }
+    for i in 0..worker_count {
+        let notify_clone = Arc::clone(&notify);
+        tokio::spawn(async move {
+            worker_loop(i, notify_clone).await;
+        });
     }
 }
 
@@ -112,20 +41,11 @@ async fn worker_loop(worker_id: usize, notify: Arc<Notify>) {
     let worker_name = format!("blp-worker-{}", worker_id);
 
     loop {
-        // Try to process a task
         match process_queue_item(&worker_name).await {
-            Ok(true) => {
-                // Task was processed, immediately try to get another one
-                // This handles the case when multiple tasks are queued
-                continue;
-            }
-            Ok(false) => {
-                // No tasks available, wait for notification
-                notify.notified().await;
-            }
+            Ok(true) => continue,
+            Ok(false) => notify.notified().await,
             Err(e) => {
                 eprintln!("[ERROR] {} error: {:?}", worker_name, e);
-                // On error, wait a bit before retrying
                 sleep(Duration::from_secs(1)).await;
             }
         }
@@ -175,9 +95,7 @@ async fn process_attachments(item: &mut BlpQueueItem) -> Result<Vec<(String, Vec
             crate::db::blp_queue::ConversionType::ToBLP => {
                 convert_to_blp(attachment, item.quality).await
             }
-            crate::db::blp_queue::ConversionType::ToPNG => {
-                convert_to_png(attachment).await
-            }
+            crate::db::blp_queue::ConversionType::ToPNG => convert_to_png(attachment).await,
         };
 
         match result {
@@ -197,18 +115,21 @@ async fn process_attachments(item: &mut BlpQueueItem) -> Result<Vec<(String, Vec
             }
             Err(e) => {
                 // Create error text file instead of failing the whole batch
-                let base_name = attachment.filename.rsplit('.').nth(1)
+                let base_name = attachment
+                    .filename
+                    .rsplit('.')
+                    .nth(1)
                     .map(|s| s.to_string())
                     .unwrap_or_else(|| attachment.filename.clone());
                 let mut error_filename = format!("{}.error.txt", base_name);
-                
+
                 // Handle duplicate error filenames too
                 let count = filename_counts.entry(error_filename.clone()).or_insert(0);
                 *count += 1;
                 if *count > 1 {
                     error_filename = format!("{}.error_{}.txt", base_name, count);
                 }
-                
+
                 let error_content = format!(
                     "Error converting file: {}\n\nError details:\n{:?}\n\nTimestamp: {}",
                     attachment.filename,
@@ -216,11 +137,8 @@ async fn process_attachments(item: &mut BlpQueueItem) -> Result<Vec<(String, Vec
                     chrono::Utc::now().format("%Y-%m-%d %H:%M:%S UTC")
                 );
                 converted_files.push((error_filename, error_content.into_bytes()));
-                
-                eprintln!(
-                    "[ERROR] Failed to convert {}: {:?}",
-                    attachment.filename, e
-                );
+
+                eprintln!("[ERROR] Failed to convert {}: {:?}", attachment.filename, e);
                 // Continue processing other files instead of returning error
             }
         }
@@ -230,7 +148,7 @@ async fn process_attachments(item: &mut BlpQueueItem) -> Result<Vec<(String, Vec
 }
 
 async fn convert_to_blp(
-    attachment: &AttachmentItem,
+    attachment: &Attachment,
     quality: u8,
 ) -> Result<(String, Vec<u8>), BotError> {
     // Download image
@@ -270,26 +188,22 @@ async fn convert_to_blp(
 
         Ok::<_, blp::error::error::BlpError>(ctx.bytes)
     })
-    .await
-    .map_err(|e| BotError::new("tokio_join_error").push_str(e.to_string()))?
-    .map_err(|e| BotError::new("blp_conversion_failed").push_str(e.to_string()))?;
+    .await??;
 
     Ok((output_filename, blp_bytes))
 }
 
-async fn convert_to_png(
-    attachment: &AttachmentItem,
-) -> Result<(String, Vec<u8>), BotError> {
+async fn convert_to_png(attachment: &Attachment) -> Result<(String, Vec<u8>), BotError> {
     // Download BLP file
     let client = state::client().await;
     let response = client.get(&attachment.url).send().await?;
-    
+
     if !response.status().is_success() {
         return Err(BotError::new("download_failed").push_str(response.status().to_string()));
     }
 
     let blp_data = response.bytes().await?.to_vec();
-    
+
     // Generate output filename (replace .blp with .png)
     let output_filename = attachment
         .filename
@@ -302,28 +216,36 @@ async fn convert_to_png(
     let png_bytes = tokio::task::spawn_blocking(move || {
         use blp::core::image::ImageBlp;
         use image::{DynamicImage, ImageFormat};
-        
+
         // Parse BLP
         let mut img = ImageBlp::from_buf(&blp_data)?;
-        
+
         // Decode only first mip level
-        img.decode(&blp_data, &[true, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false])?;
+        img.decode(
+            &blp_data,
+            &[
+                true, false, false, false, false, false, false, false, false, false, false, false,
+                false, false, false, false,
+            ],
+        )?;
 
         // Get first mipmap
-        let mipmap = img.mipmaps.get(0).ok_or_else(|| blp::error::error::BlpError::new("no_mipmap"))?;
-        let rgba = mipmap.image.as_ref().ok_or_else(|| blp::error::error::BlpError::new("no_image_data"))?;
+        let mipmap = img
+            .mipmaps
+            .get(0)
+            .ok_or_else(|| blp::error::error::BlpError::new("no_mipmap"))?;
+        let rgba = mipmap
+            .image
+            .as_ref()
+            .ok_or_else(|| blp::error::error::BlpError::new("no_image_data"))?;
 
         // Encode to PNG in memory
         let mut png_buffer = Cursor::new(Vec::new());
-        DynamicImage::ImageRgba8(rgba.clone())
-            .write_to(&mut png_buffer, ImageFormat::Png)
-            .map_err(|e| blp::error::error::BlpError::new("png_encode_failed").push_std(e))?;
+        DynamicImage::ImageRgba8(rgba.clone()).write_to(&mut png_buffer, ImageFormat::Png)?;
 
         Ok::<_, blp::error::error::BlpError>(png_buffer.into_inner())
     })
-    .await
-    .map_err(|e| BotError::new("tokio_join_error").push_str(e.to_string()))?
-    .map_err(|e| BotError::new("png_conversion_failed").push_str(e.to_string()))?;
+    .await??;
 
     Ok((output_filename, png_bytes))
 }
@@ -331,32 +253,32 @@ async fn convert_to_png(
 /// Create ZIP archive from converted files
 fn create_zip_archive(files: &[(String, Vec<u8>)]) -> Result<Vec<u8>, BotError> {
     use std::io::Write;
-    
+
     let mut zip_buffer = Vec::new();
     {
         let cursor = Cursor::new(&mut zip_buffer);
         let mut zip = ZipWriter::new(cursor);
-        let options = FileOptions::<()>::default()
-            .compression_method(zip::CompressionMethod::Stored); // No compression for already compressed images
+        let options =
+            FileOptions::<()>::default().compression_method(zip::CompressionMethod::Stored); // No compression for already compressed images
 
         for (filename, data) in files {
-            zip.start_file(filename, options)
-                .map_err(|e| BotError::new("zip_start_file_error").push_str(e.to_string()))?;
-            zip.write_all(data)
-                .map_err(|e| BotError::new("zip_write_error").push_str(e.to_string()))?;
+            zip.start_file(filename, options)?;
+            zip.write_all(data)?;
         }
 
-        zip.finish()
-            .map_err(|e| BotError::new("zip_finish_error").push_str(e.to_string()))?;
+        zip.finish()?;
     }
     Ok(zip_buffer)
 }
 
-async fn send_response(item: &BlpQueueItem, converted_files: Vec<(String, Vec<u8>)>) -> Result<(), BotError> {
+async fn send_response(
+    item: &BlpQueueItem,
+    converted_files: Vec<(String, Vec<u8>)>,
+) -> Result<(), BotError> {
     // Acquire rate limit token BEFORE making request
     let limiter = state::rate_limiter().await;
     limiter.acquire().await;
-    
+
     let client = state::client().await;
     let token = state::token().await;
 
@@ -391,10 +313,12 @@ async fn send_response(item: &BlpQueueItem, converted_files: Vec<(String, Vec<u8
 
         // Update text content with completion status
         let format_desc = match item.conversion_type {
-            crate::db::blp_queue::ConversionType::ToBLP => format!("to BLP (quality: {})", item.quality),
+            crate::db::blp_queue::ConversionType::ToBLP => {
+                format!("to BLP (quality: {})", item.quality)
+            }
             crate::db::blp_queue::ConversionType::ToPNG => "to PNG".to_string(),
         };
-        
+
         let payload = serde_json::json!({
             "content": format!(
                 "✅ Converted {} image(s) {}{}\n⏱️ Completed in {}",
@@ -410,8 +334,7 @@ async fn send_response(item: &BlpQueueItem, converted_files: Vec<(String, Vec<u8
         for (idx, (filename, file_data)) in files_to_send.iter().enumerate() {
             let part = Part::bytes(file_data.clone())
                 .file_name(filename.clone())
-                .mime_str("application/octet-stream")
-                .map_err(|e| BotError::new("mime_error").push_str(e.to_string()))?;
+                .mime_str("application/octet-stream")?;
 
             form = form.part(format!("files[{}]", idx), part);
         }
@@ -443,7 +366,9 @@ async fn send_response(item: &BlpQueueItem, converted_files: Vec<(String, Vec<u8
         let mut form = Form::new();
 
         let format_desc = match item.conversion_type {
-            crate::db::blp_queue::ConversionType::ToBLP => format!("to BLP (quality: {})", item.quality),
+            crate::db::blp_queue::ConversionType::ToBLP => {
+                format!("to BLP (quality: {})", item.quality)
+            }
             crate::db::blp_queue::ConversionType::ToPNG => "to PNG".to_string(),
         };
 
@@ -465,8 +390,7 @@ async fn send_response(item: &BlpQueueItem, converted_files: Vec<(String, Vec<u8
         for (idx, (filename, file_data)) in converted_files.iter().enumerate() {
             let part = Part::bytes(file_data.clone())
                 .file_name(filename.clone())
-                .mime_str("application/octet-stream")
-                .map_err(|e| BotError::new("mime_error").push_str(e.to_string()))?;
+                .mime_str("application/octet-stream")?;
 
             form = form.part(format!("files[{}]", idx), part);
         }

@@ -44,19 +44,15 @@ async fn worker_loop(worker_id: usize, notify: Arc<Notify>) {
     let worker_name = format!("rembg-worker-{}", worker_id);
 
     loop {
-        // Try to process a task
         match process_queue_item(&worker_name).await {
             Ok(true) => {
-                // Task was processed, immediately try to get another one
                 continue;
             }
             Ok(false) => {
-                // No tasks available, wait for notification
                 notify.notified().await;
             }
             Err(e) => {
                 eprintln!("[ERROR] {} error: {:?}", worker_name, e);
-                // On error, wait a bit before retrying
                 tokio::time::sleep(Duration::from_secs(1)).await;
             }
         }
@@ -67,15 +63,13 @@ async fn worker_loop(worker_id: usize, notify: Arc<Notify>) {
 pub fn start_rembg_workers(worker_count: usize) {
     REMBG_AVAILABLE.store(true, Ordering::Relaxed);
 
-    // Create notification primitive and store globally so notify_rembg_task can wake workers
     let notify = Arc::new(Notify::new());
     let _ = TASK_NOTIFY.set(notify.clone());
 
     for i in 0..worker_count {
-        let worker_index = i + 1; // 1-based id like blp
         let notify_clone = Arc::clone(&notify);
         tokio::spawn(async move {
-            worker_loop(worker_index, notify_clone).await;
+            worker_loop(i, notify_clone).await;
         });
     }
 }
@@ -257,112 +251,56 @@ async fn send_response_editable(
         file_count, seconds
     );
 
-    if let Some(status_msg_id) = &item.status_message_id {
-        // PATCH (edit) the original status message
-        use reqwest::multipart::{Form, Part};
-        let mut form = Form::new();
-        let payload = serde_json::json!({ "content": content });
-        form = form.text("payload_json", payload.to_string());
+    // PATCH (edit) the original status message
+    use reqwest::multipart::{Form, Part};
+    let mut form = Form::new();
+    let payload = serde_json::json!({ "content": content });
+    form = form.text("payload_json", payload.to_string());
 
-        if should_zip {
-            let zip_data = create_zip_archive(&results)?;
-            let part = Part::bytes(zip_data)
-                .file_name("processed.zip")
-                .mime_str("application/zip")?;
-            form = form.part("files[0]", part);
-        } else {
-            for (idx, result) in results.iter().enumerate() {
-                let mime_type = if result.is_error {
-                    "text/plain"
-                } else {
-                    "image/png"
-                };
-                let part = Part::bytes(result.data.clone())
-                    .file_name(result.filename.clone())
-                    .mime_str(mime_type)?;
-                form = form.part(format!("files[{}]", idx), part);
-            }
-        }
-
-        let response = client
-            .patch(&format!(
-                "https://discord.com/api/v10/channels/{}/messages/{}",
-                item.channel_id, status_msg_id
-            ))
-            .header("Authorization", format!("Bot {}", token))
-            .multipart(form)
-            .send()
-            .await?;
-        let status = response.status();
-        if !status.is_success() {
-            let error_text = response.text().await.unwrap_or_default();
-            eprintln!(
-                "[REMBG][worker] PATCH failed: HTTP {}: {}",
-                status.as_u16(),
-                error_text
-            );
-            return Err(BotError::new("message_edit_failed").push_str(format!(
-                "HTTP {}: {}",
-                status.as_u16(),
-                error_text
-            )));
-        }
+    if should_zip {
+        let zip_data = create_zip_archive(&results)?;
+        let part = Part::bytes(zip_data)
+            .file_name("processed.zip")
+            .mime_str("application/zip")?;
+        form = form.part("files[0]", part);
     } else {
-        // Fallback: send new message if status_message_id not available
-        use reqwest::multipart::{Form, Part};
-        let mut form = Form::new();
-        form = form.text("content", content.clone());
-        let payload = serde_json::json!({
-            "message_reference": {
-                "message_id": item.message_id
-            }
-        });
-        form = form.text("payload_json", payload.to_string());
-
-        if should_zip {
-            let zip_data = create_zip_archive(&results)?;
-            let part = Part::bytes(zip_data)
-                .file_name("processed.zip")
-                .mime_str("application/zip")?;
-            form = form.part("files[0]", part);
-        } else {
-            for (idx, result) in results.iter().enumerate() {
-                let mime_type = if result.is_error {
-                    "text/plain"
-                } else {
-                    "image/png"
-                };
-                let part = Part::bytes(result.data.clone())
-                    .file_name(result.filename.clone())
-                    .mime_str(mime_type)?;
-                form = form.part(format!("files[{}]", idx), part);
-            }
-        }
-
-        let response = client
-            .post(&format!(
-                "https://discord.com/api/v10/channels/{}/messages",
-                item.channel_id
-            ))
-            .header("Authorization", format!("Bot {}", token))
-            .multipart(form)
-            .send()
-            .await?;
-        let status = response.status();
-        if !status.is_success() {
-            let error_text = response.text().await.unwrap_or_default();
-            eprintln!(
-                "[REMBG][worker] POST failed: HTTP {}: {}",
-                status.as_u16(),
-                error_text
-            );
-            return Err(BotError::new("message_send_failed").push_str(format!(
-                "HTTP {}: {}",
-                status.as_u16(),
-                error_text
-            )));
+        for (idx, result) in results.iter().enumerate() {
+            let mime_type = if result.is_error {
+                "text/plain"
+            } else {
+                "image/png"
+            };
+            let part = Part::bytes(result.data.clone())
+                .file_name(result.filename.clone())
+                .mime_str(mime_type)?;
+            form = form.part(format!("files[{}]", idx), part);
         }
     }
+
+    let response = client
+        .patch(&format!(
+            "https://discord.com/api/v10/channels/{}/messages/{}",
+            item.channel_id, item.status_message_id
+        ))
+        .header("Authorization", format!("Bot {}", token))
+        .multipart(form)
+        .send()
+        .await?;
+    let status = response.status();
+    if !status.is_success() {
+        let error_text = response.text().await.unwrap_or_default();
+        eprintln!(
+            "[REMBG][worker] PATCH failed: HTTP {}: {}",
+            status.as_u16(),
+            error_text
+        );
+        return Err(BotError::new("message_edit_failed").push_str(format!(
+            "HTTP {}: {}",
+            status.as_u16(),
+            error_text
+        )));
+    }
+
     Ok(())
 }
 
@@ -391,15 +329,12 @@ fn create_zip_archive(results: &[ProcessedAttachment]) -> Result<Vec<u8>, BotErr
             result.filename.clone()
         };
 
-        zip.start_file(filename, options)
-            .map_err(|e| BotError::new("zip_create_failed").push_str(format!("{:?}", e)))?;
+        zip.start_file(filename, options)?;
 
-        std::io::Write::write_all(&mut zip, &result.data)
-            .map_err(|e| BotError::new("zip_write_failed").push_str(format!("{:?}", e)))?;
+        std::io::Write::write_all(&mut zip, &result.data)?;
     }
 
-    zip.finish()
-        .map_err(|e| BotError::new("zip_finish_failed").push_str(format!("{:?}", e)))?;
+    zip.finish()?;
 
     Ok(zip_buffer.into_inner())
 }

@@ -119,6 +119,20 @@ impl fmt::Display for BotError {
     }
 }
 
+impl From<String> for BotError {
+    #[track_caller]
+    fn from(s: String) -> Self {
+        BotError::new("string_error").push_std(std::io::Error::new(std::io::ErrorKind::Other, s))
+    }
+}
+
+impl From<&str> for BotError {
+    #[track_caller]
+    fn from(s: &str) -> Self {
+        BotError::new("str_error").push_std(std::io::Error::new(std::io::ErrorKind::Other, s))
+    }
+}
+
 impl std::error::Error for BotError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         self.causes.iter().find_map(|c| match c {
@@ -199,16 +213,16 @@ impl From<image::ImageError> for BotError {
     }
 }
 
-impl From<String> for BotError {
+impl From<zip::result::ZipError> for BotError {
     #[track_caller]
-    fn from(s: String) -> Self {
-        BotError::new("string_error").push_std(std::io::Error::new(std::io::ErrorKind::Other, s))
+    fn from(e: zip::result::ZipError) -> Self {
+        BotError::new("zip").push_std(e)
     }
 }
 
-impl From<&str> for BotError {
+impl From<tokio::task::JoinError> for BotError {
     #[track_caller]
-    fn from(s: &str) -> Self {
-        BotError::new("str_error").push_std(std::io::Error::new(std::io::ErrorKind::Other, s))
+    fn from(e: tokio::task::JoinError) -> Self {
+        BotError::new("zip").push_std(e)
     }
 }

@@ -3,7 +3,6 @@ mod db;
 mod discord;
 mod error;
 mod state;
-mod types;
 mod workers;
 
 use std::env;

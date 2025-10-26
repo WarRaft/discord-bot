@@ -1,6 +1,6 @@
 use reqwest::Client;
 use crate::error::{BotError};
-use crate::types::discord::*;
+use crate::discord::discord::*;
 use crate::state;
 
 pub async fn get_gateway_bot_info(client: &Client, token: &str) -> Result<GatewayBotInfo, BotError> {

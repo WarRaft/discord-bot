@@ -4,7 +4,7 @@ mod png;
 mod rembg;
 
 use crate::error::{BotError};
-use crate::types::discord::Interaction;
+use crate::discord::discord::Interaction;
 use serde::Serialize;
 
 #[derive(Debug, Serialize)]

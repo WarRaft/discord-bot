@@ -1,99 +1,79 @@
+use crate::workers::queue::QueueStatus;
+use crate::discord::message::message::Attachment;
+use crate::error::BotError;
 use bson::serde_helpers::datetime;
 use chrono::{DateTime, Utc};
-use mongodb::bson::{doc, oid::ObjectId, Bson};
 use mongodb::Collection;
+use mongodb::bson::{Bson, doc, oid::ObjectId};
 use serde::{Deserialize, Serialize};
 use serde_with::serde_as;
 use strum::{Display, EnumString};
-use crate::error::BotError;
 
 #[serde_as]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BlpQueueItem {
     #[serde(rename = "_id", skip_serializing_if = "Option::is_none")]
     pub id: Option<ObjectId>,
-    
+
     /// Discord user ID who requested conversion
     pub user_id: String,
-    
+
     /// Discord channel ID where message was sent
     pub channel_id: String,
-    
+
     /// Original message ID (for context)
     pub message_id: String,
-    
+
     /// Status message ID (for editing progress updates)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub status_message_id: Option<String>,
-    
+
     /// Interaction ID for response
     pub interaction_id: String,
-    
+
     /// Interaction token for response
     pub interaction_token: String,
-    
+
     /// List of attachment URLs to convert
-    pub attachments: Vec<AttachmentItem>,
-    
+    pub attachments: Vec<Attachment>,
+
     /// Conversion type (ToBLP or ToPNG)
     pub conversion_type: ConversionType,
-    
+
     /// BLP quality (1-100, only used for ToBLP conversion)
     pub quality: u8,
-    
+
     /// Whether to zip the converted files
     pub zip: bool,
-    
+
     /// Current status
     pub status: QueueStatus,
-    
+
     /// Worker ID (if being processed)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub worker_id: Option<String>,
-    
+
     /// Created timestamp
     #[serde_as(as = "datetime::FromChrono04DateTime")]
     pub created_at: DateTime<Utc>,
-    
+
     /// Started processing timestamp
     #[serde_as(as = "Option<datetime::FromChrono04DateTime>")]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub started_at: Option<DateTime<Utc>>,
-    
+
     /// Completed timestamp
     #[serde_as(as = "Option<datetime::FromChrono04DateTime>")]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub completed_at: Option<DateTime<Utc>>,
-    
+
     /// Error message (if failed)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
-    
+
     /// Retry count
     #[serde(default)]
     pub retry_count: u32,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct AttachmentItem {
-    /// Original URL
-    pub url: String,
-    
-    /// Original filename
-    pub filename: String,
-    
-    /// Converted file path (if completed)
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub converted_path: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(rename_all = "lowercase")]
-pub enum QueueStatus {
-    Pending,
-    Processing,
-    Completed,
-    Failed,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Display, EnumString)]
@@ -101,9 +81,9 @@ pub enum QueueStatus {
 #[strum(serialize_all = "lowercase")]
 pub enum ConversionType {
     #[strum(serialize = "toblp")]
-    ToBLP,   // PNG/JPG → BLP
+    ToBLP, // PNG/JPG → BLP
     #[strum(serialize = "topng")]
-    ToPNG,   // BLP → PNG
+    ToPNG, // BLP → PNG
 }
 
 impl BlpQueueItem {
@@ -117,17 +97,18 @@ impl BlpQueueItem {
         message_id: String,
         interaction_id: String,
         interaction_token: String,
-        attachments: Vec<AttachmentItem>,
+        attachments: Vec<Attachment>,
         conversion_type: ConversionType,
         quality: u8,
         zip: bool,
+        status_message_id: Option<String>,
     ) -> Self {
         Self {
             id: None,
             user_id,
             channel_id,
             message_id,
-            status_message_id: None,
+            status_message_id,
             interaction_id,
             interaction_token,
             attachments,
@@ -152,12 +133,15 @@ impl BlpQueueItem {
     }
 
     /// Get next pending item and mark as processing
-    pub async fn claim_next(db: &mongodb::Database, worker_id: String) -> Result<Option<BlpQueueItem>, BotError> {
+    pub async fn claim_next(
+        db: &mongodb::Database,
+        worker_id: String,
+    ) -> Result<Option<BlpQueueItem>, BotError> {
         let collection: Collection<BlpQueueItem> = db.collection(Self::COLLECTION_NAME);
-        
+
         // Find and update pending item atomically
         let now = Bson::DateTime(bson::DateTime::now());
-        
+
         let result = collection
             .find_one_and_update(
                 doc! {
@@ -183,7 +167,7 @@ impl BlpQueueItem {
     pub async fn mark_completed(db: &mongodb::Database, id: ObjectId) -> Result<(), BotError> {
         let collection: Collection<BlpQueueItem> = db.collection(Self::COLLECTION_NAME);
         let now = Bson::DateTime(bson::DateTime::now());
-        
+
         collection
             .update_one(
                 doc! { "_id": id },
@@ -200,10 +184,14 @@ impl BlpQueueItem {
     }
 
     /// Mark item as failed and increment retry count
-    pub async fn mark_failed(db: &mongodb::Database, id: ObjectId, error: String) -> Result<(), BotError> {
+    pub async fn mark_failed(
+        db: &mongodb::Database,
+        id: ObjectId,
+        error: String,
+    ) -> Result<(), BotError> {
         let collection: Collection<BlpQueueItem> = db.collection(Self::COLLECTION_NAME);
         let now = Bson::DateTime(bson::DateTime::now());
-        
+
         collection
             .update_one(
                 doc! { "_id": id },
@@ -222,12 +210,16 @@ impl BlpQueueItem {
     }
 
     /// Reset stuck processing items (e.g., after service restart)
-    pub async fn reset_stuck_items(db: &mongodb::Database, timeout_minutes: i64) -> Result<u64, BotError> {
+    pub async fn reset_stuck_items(
+        db: &mongodb::Database,
+        timeout_minutes: i64,
+    ) -> Result<u64, BotError> {
         let collection: Collection<BlpQueueItem> = db.collection(Self::COLLECTION_NAME);
-        
+
         let threshold = Utc::now() - chrono::Duration::minutes(timeout_minutes);
-        let threshold_bson = Bson::DateTime(bson::DateTime::from_millis(threshold.timestamp_millis()));
-        
+        let threshold_bson =
+            Bson::DateTime(bson::DateTime::from_millis(threshold.timestamp_millis()));
+
         let result = collection
             .update_many(
                 doc! {
@@ -251,7 +243,9 @@ impl BlpQueueItem {
     #[allow(dead_code)]
     pub async fn count_pending(db: &mongodb::Database) -> Result<u64, BotError> {
         let collection: Collection<BlpQueueItem> = db.collection(Self::COLLECTION_NAME);
-        let count = collection.count_documents(doc! { "status": "pending" }).await?;
+        let count = collection
+            .count_documents(doc! { "status": "pending" })
+            .await?;
         Ok(count)
     }
 
@@ -259,18 +253,23 @@ impl BlpQueueItem {
     #[allow(dead_code)]
     pub async fn count_processing(db: &mongodb::Database) -> Result<u64, BotError> {
         let collection: Collection<BlpQueueItem> = db.collection(Self::COLLECTION_NAME);
-        let count = collection.count_documents(doc! { "status": "processing" }).await?;
+        let count = collection
+            .count_documents(doc! { "status": "processing" })
+            .await?;
         Ok(count)
     }
 
     /// Count all items by conversion type (total usage statistics)
-    pub async fn count_total_by_type(db: &mongodb::Database, conversion_type: ConversionType) -> Result<u64, BotError> {
+    pub async fn count_total_by_type(
+        db: &mongodb::Database,
+        conversion_type: ConversionType,
+    ) -> Result<u64, BotError> {
         let collection: Collection<BlpQueueItem> = db.collection(Self::COLLECTION_NAME);
-        
-        let filter = doc! { 
+
+        let filter = doc! {
             "conversion_type": conversion_type.to_string()
         };
-        
+
         let count = collection.count_documents(filter).await?;
         Ok(count)
     }

@@ -1,4 +1,4 @@
 pub mod api;
+pub mod discord;
 pub mod gateway;
-pub mod handle;
-mod send_message;
+pub mod message;

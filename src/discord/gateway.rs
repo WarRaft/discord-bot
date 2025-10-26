@@ -1,11 +1,12 @@
-use crate::discord::handle::message::handle_message;
+use crate::discord::message::handle::handle_message;
+use crate::discord::message::message::Message;
+use crate::error::BotError;
 use crate::state;
-use crate::types::discord::*;
+use crate::discord::discord::*;
 use futures_util::{SinkExt, StreamExt};
 use serde_json::json;
 use tokio::time::{Duration, interval};
 use tokio_tungstenite::{connect_async, tungstenite::protocol::Message as WsMessage};
-use crate::error::BotError;
 
 pub async fn run_gateway(gateway_url: String) -> Result<(), BotError> {
     let (ws_stream, _) = connect_async(&gateway_url).await?;

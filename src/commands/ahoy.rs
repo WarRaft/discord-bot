@@ -2,7 +2,7 @@ use crate::commands::{Command, SlashCommand};
 use crate::discord::api;
 use crate::error::BotError;
 use crate::state;
-use crate::types::discord::Interaction;
+use crate::discord::discord::Interaction;
 
 pub struct Ahoy;
 

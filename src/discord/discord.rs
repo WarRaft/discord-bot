@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use crate::discord::message::message::Attachment;
 
 // Discord Gateway opcodes
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -104,16 +105,7 @@ pub struct InteractionUser {
 #[derive(Debug, Deserialize)]
 pub struct InteractionMessage {
     pub id: Option<String>,
-    pub attachments: Option<Vec<MessageAttachment>>,
-}
-
-#[allow(dead_code)]
-#[derive(Debug, Clone, Deserialize)]
-pub struct MessageAttachment {
-    pub id: String,
-    pub filename: String,
-    pub url: String,
-    pub size: u64,
+    pub attachments: Option<Vec<Attachment>>,
 }
 
 #[allow(dead_code)]
@@ -133,35 +125,7 @@ pub struct InteractionResolved {
 #[derive(Debug, Deserialize)]
 pub struct ResolvedMessage {
     pub id: String,
-    pub attachments: Option<Vec<MessageAttachment>>,
-}
-
-// Message from MESSAGE_CREATE event
-#[derive(Debug, Deserialize)]
-pub struct Message {
-    pub id: String,
-    pub channel_id: String,
-    pub content: String,
-    pub author: MessageAuthor,
-    #[serde(default)]
-    pub attachments: Vec<MessageAttachment>,
-    #[serde(default)]
-    pub mentions: Vec<MessageMention>,
-}
-
-#[allow(dead_code)]
-#[derive(Debug, Deserialize)]
-pub struct MessageAuthor {
-    pub id: String,
-    pub username: String,
-    pub bot: Option<bool>,
-}
-
-#[allow(dead_code)]
-#[derive(Debug, Deserialize)]
-pub struct MessageMention {
-    pub id: String,
-    pub username: String,
+    pub attachments: Option<Vec<Attachment>>,
 }
 
 // Interaction response to Discord
