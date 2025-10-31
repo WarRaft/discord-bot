@@ -3,13 +3,11 @@ use crate::discord::message::message::MessageReference;
 use crate::discord::message::send::MessageSend;
 use crate::error::BotError;
 use crate::state;
-use crate::workers::blp::job::ConversionTarget;
 use crate::workers::processor::{TaskProcessor, notify_workers};
 use crate::workers::queue::QueueStatus;
 use crate::workers::rembg::job::JobRembg;
 use async_trait::async_trait;
 use blp::core::decode::decode_to_rgba;
-use blp::core::image::ImageBlp;
 use bson::{Bson, doc, serialize_to_bson};
 use image::{DynamicImage, ImageFormat, RgbImage, RgbaImage};
 use mongodb::Collection;
@@ -136,74 +134,71 @@ impl TaskProcessor for RembgProcessor {
                 continue;
             }
 
-            let result: Result<(String, Vec<u8>), BotError> = match job.target {
-                ConversionTarget::BLP => {
-                    let output_filename = format!("{}.blp", attachment_memory.filename_stem);
-
-                    let blp_bytes = tokio::task::spawn_blocking({
-                        let image_data = attachment_memory.bytes.to_vec();
-                        move || {
-                            let mut img = ImageBlp::from_buf(&image_data)?;
-
-                            let mip_visible = vec![true; 16];
-                            img.decode(&image_data, &mip_visible)?;
-
-                            let ctx = img.encode_blp(job.quality, &mip_visible)?;
-
-                            Ok::<_, blp::error::error::BlpError>(ctx.bytes)
-                        }
-                    })
-                    .await??;
-
-                    Ok((output_filename, blp_bytes))
-                }
-                ConversionTarget::PNG => {
-                    let output_filename = format!("{}.png", attachment_memory.filename_stem);
-
-                    let png_bytes = tokio::task::spawn_blocking({
-                        let blp_data = attachment_memory.bytes.to_vec();
-                        move || {
-                            let mut img = ImageBlp::from_buf(&blp_data)?;
-
-                            // Decode only first mip level
-                            img.decode(
-                                &blp_data,
-                                &[
-                                    true, false, false, false, false, false, false, false, false,
-                                    false, false, false, false, false, false, false,
-                                ],
-                            )?;
-
-                            let rgba = img
-                                .mipmaps
-                                .get(0)
-                                .ok_or_else(|| blp::error::error::BlpError::new("no_mipmap"))?
-                                .image
-                                .as_ref()
-                                .ok_or_else(|| blp::error::error::BlpError::new("no_image_data"))?;
-
-                            let mut png_buffer = Cursor::new(Vec::new());
-                            DynamicImage::ImageRgba8(rgba.clone())
-                                .write_to(&mut png_buffer, ImageFormat::Png)?;
-
-                            Ok::<_, blp::error::error::BlpError>(png_buffer.into_inner())
-                        }
-                    })
-                    .await??;
-
-                    Ok((output_filename, png_bytes))
-                }
+            let options = RemovalOptions {
+                threshold: job.threshold,
+                binary: job.binary,
+                ..Default::default()
             };
 
+            let result: Result<Vec<(String, Vec<u8>)>, BotError> = async {
+                // Decode input to RGBA image
+                let img = decode_to_rgba(&attachment_memory.bytes)?;
+
+                // Get global model manager
+                let manager = Arc::clone(&MODEL_MANAGER);
+
+                // Run background removal
+                let removal_result = rembg(&*manager, img, &options)?;
+
+                // Extract images
+                let img: &RgbaImage = removal_result.image();
+                let mask_img: &RgbImage = removal_result.mask();
+
+                // Encode result to PNG bytes
+                let mut buf_image = Vec::new();
+                let mut buf_mask = Vec::new();
+
+                // Rgba → PNG
+                {
+                    let dyn_img = DynamicImage::ImageRgba8(img.clone());
+                    dyn_img.write_to(&mut Cursor::new(&mut buf_image), ImageFormat::Png)?;
+                }
+
+                // Mask → PNG
+                {
+                    let dyn_mask = DynamicImage::ImageRgb8(mask_img.clone());
+                    dyn_mask.write_to(&mut Cursor::new(&mut buf_mask), ImageFormat::Png)?;
+                }
+
+                let (image_bytes, mask_bytes) = (buf_image, buf_mask);
+
+                let mut files = Vec::new();
+
+                // Add processed image
+                let image_filename = format!("{}_no_bg.png", attachment_memory.filename_stem);
+                files.push((image_filename, image_bytes));
+
+                // Add mask if requested
+                if job.mask {
+                    let mask_filename = format!("{}_mask.png", attachment_memory.filename_stem);
+                    files.push((mask_filename, mask_bytes));
+                }
+
+                Ok(files)
+            }
+            .await;
+
             match result {
-                Ok((filename, bytes)) => {
-                    converted_files.push((filename, bytes));
+                Ok(files) => {
+                    for (filename, bytes) in files {
+                        converted_files.push((filename, bytes));
+                    }
                 }
                 Err(e) => {
                     let error_filename = format!("{}.error.txt", attachment_memory.filename_stem);
 
                     let error_content = format!(
-                        "Error converting file: {}\n\nError details:\n{:?}\n\nTimestamp: {}",
+                        "Error processing file: {}\n\nError details:\n{:?}\n\nTimestamp: {}",
                         attachment_memory.meta.filename,
                         e,
                         chrono::Utc::now().format("%Y-%m-%d %H:%M:%S UTC")
@@ -238,21 +233,13 @@ impl TaskProcessor for RembgProcessor {
 
                     zip.finish()?;
                 }
-                let zip_filename = match job.target {
-                    ConversionTarget::BLP => "converted_images.blp.zip".to_string(),
-                    ConversionTarget::PNG => "converted_images.png.zip".to_string(),
-                };
+                let zip_filename = "processed_images.zip".to_string();
                 vec![(zip_filename, zip_buffer)]
             } else {
                 converted_files.clone()
             };
 
-            let format_desc = match job.target {
-                ConversionTarget::BLP => {
-                    format!("to BLP (quality: {})", job.quality)
-                }
-                ConversionTarget::PNG => "to PNG".to_string(),
-            };
+            let format_desc = "background removed".to_string();
 
             let _ = MessageSend {
                 content: Some(format!(
@@ -286,40 +273,4 @@ impl TaskProcessor for RembgProcessor {
         notify_workers::<RembgProcessor>();
         Ok(true)
     }
-}
-
-pub async fn process_single_image(
-    image_bytes: &[u8],
-    options: &RemovalOptions,
-) -> Result<(Vec<u8>, Vec<u8>), BotError> {
-    // Decode input to RGBA image
-    let img = decode_to_rgba(image_bytes)?;
-
-    // Get global model manager
-    let manager = Arc::clone(&MODEL_MANAGER);
-
-    // Run background removal
-    let result = rembg(&*manager, img, options)?;
-
-    // Extract images
-    let img: &RgbaImage = result.image();
-    let mask_img: &RgbImage = result.mask();
-
-    // Encode result to PNG bytes
-    let mut buf_image = Vec::new();
-    let mut buf_mask = Vec::new();
-
-    // Rgba → PNG
-    {
-        let dyn_img = DynamicImage::ImageRgba8(img.clone());
-        dyn_img.write_to(&mut Cursor::new(&mut buf_image), ImageFormat::Png)?;
-    }
-
-    // Mask → PNG
-    {
-        let dyn_mask = DynamicImage::ImageRgb8(mask_img.clone());
-        dyn_mask.write_to(&mut Cursor::new(&mut buf_mask), ImageFormat::Png)?;
-    }
-
-    Ok((buf_image, buf_mask))
 }

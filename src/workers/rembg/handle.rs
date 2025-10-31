@@ -2,7 +2,6 @@ use crate::discord::message::handle::CommandArgs;
 use crate::discord::message::message::Message;
 use crate::error::BotError;
 use crate::state;
-use crate::workers::blp::job::JobBlp;
 use crate::workers::processor::notify_workers;
 use crate::workers::rembg::job::JobRembg;
 use crate::workers::rembg::processor::RembgProcessor;
@@ -10,7 +9,7 @@ use mongodb::Collection;
 
 pub async fn handle(message: Message, args: &CommandArgs) -> Result<(), BotError> {
     let db = state::db().await;
-    let collection: Collection<JobRembg> = db.collection(JobBlp::COLLECTION);
+    let collection: Collection<JobRembg> = db.collection(JobRembg::COLLECTION);
 
     collection
         .insert_one(JobRembg {
