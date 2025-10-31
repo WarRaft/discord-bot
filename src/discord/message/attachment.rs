@@ -3,6 +3,8 @@ use bytes::Bytes;
 use futures_util::{StreamExt, stream::FuturesOrdered};
 use reqwest::{Client, header::CONTENT_TYPE};
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
+use std::path::Path;
 use std::sync::Arc;
 use tokio::sync::Semaphore;
 
@@ -14,21 +16,62 @@ pub struct Attachment {
     pub filename: String,
 }
 
+pub fn ensure_unique_filenames(mut attachments: Vec<Attachment>) -> Vec<Attachment> {
+    let mut counters: HashMap<String, usize> = HashMap::new();
+
+    for att in attachments.iter_mut() {
+        let path = Path::new(&att.filename);
+        let stem = path
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or(&att.filename);
+        let ext = path.extension().and_then(|s| s.to_str());
+
+        let count = counters.entry(stem.to_string()).or_insert(0);
+        *count += 1;
+
+        if *count > 1 {
+            att.filename = match ext {
+                Some(ext) => format!("{}_{}.{}", stem, count, ext),
+                None => format!("{}_{}", stem, count),
+            };
+        }
+    }
+
+    attachments
+}
+
 #[derive(Debug, Clone)]
 pub struct AttachmentMemory {
     pub meta: Attachment,
     pub content_type: Option<String>,
     pub bytes: Bytes,
     pub error: Option<String>,
+    pub filename_stem: String,
+    #[allow(dead_code)]
+    pub filename_extension: Option<String>,
 }
 
 impl From<Attachment> for AttachmentMemory {
     fn from(meta: Attachment) -> Self {
+        let path = Path::new(&meta.filename);
+        let filename_stem = path
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or(&meta.filename)
+            .to_string();
+        let filename_extension = path
+            .extension()
+            .and_then(|s| s.to_str())
+            .map(|s| s.to_string());
+
         Self {
             meta,
             content_type: None,
             bytes: Bytes::new(),
             error: None,
+            filename_stem,
+            filename_extension,
         }
     }
 }
@@ -59,28 +102,13 @@ impl AttachmentMemory {
         }
         m
     }
-
-    pub fn ok(&self) -> bool {
-        self.error.is_none()
-    }
-    pub fn err(&self) -> Option<&str> {
-        self.error.as_deref()
-    }
-    pub fn as_slice(&self) -> &[u8] {
-        &self.bytes
-    }
 }
 
 pub trait AttachmentVecExt: Sized {
-    fn to_memory(self) -> Vec<AttachmentMemory>;
     async fn download_all(self, concurrency: usize) -> Vec<AttachmentMemory>;
 }
 
 impl AttachmentVecExt for Vec<Attachment> {
-    fn to_memory(self) -> Vec<AttachmentMemory> {
-        self.into_iter().map(AttachmentMemory::from).collect()
-    }
-
     async fn download_all(self, concurrency: usize) -> Vec<AttachmentMemory> {
         let client = Client::new();
         let sem = Arc::new(Semaphore::new(concurrency.max(1)));

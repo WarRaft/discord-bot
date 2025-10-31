@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use crate::discord::message::message::Attachment;
+use crate::discord::message::attachment::Attachment;
 
 // Discord Gateway opcodes
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

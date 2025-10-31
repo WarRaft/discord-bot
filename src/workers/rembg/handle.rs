@@ -22,7 +22,8 @@ pub async fn handle(message: Message, arg: &CommandArgs) -> Result<(), BotError>
                 message_id: Some(message.id), //
                 ..Default::default()
             }),
-        }.send(Method::POST, &message.channel_id).await?;
+            attachments: None,
+        }.send(Method::POST, &message.channel_id, None).await?;
 
         return Ok(());
     }
@@ -36,8 +37,9 @@ pub async fn handle(message: Message, arg: &CommandArgs) -> Result<(), BotError>
             message_id: Some(message.id.clone()), //
             ..Default::default()
         }),
+        attachments: None,
     }
-    .send(Method::POST, &message.channel_id)
+    .send(Method::POST, &message.channel_id, None)
     .await?;
 
     let db = state::db().await;

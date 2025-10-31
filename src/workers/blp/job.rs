@@ -4,7 +4,7 @@ use crate::workers::queue::QueueStatus;
 use bson::serde_helpers::datetime;
 use chrono::{DateTime, Utc};
 use mongodb::Collection;
-use mongodb::bson::{Bson, doc, oid::ObjectId};
+use mongodb::bson::{doc, oid::ObjectId};
 use proc_macros::define_field_names;
 use serde::{Deserialize, Serialize};
 use serde_with::serde_as;
@@ -33,6 +33,10 @@ pub struct JobBlp {
     pub created: DateTime<Utc>,
 
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde_as(as = "Option<datetime::FromChrono04DateTime>")]
+    pub completed: Option<DateTime<Utc>>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
 
     #[serde(default)]
@@ -51,82 +55,6 @@ pub enum ConversionTarget {
 impl JobBlp {
     pub const COLLECTION: &'static str = "discord_command_blp";
     pub(crate) const MAX_RETRIES: u32 = 3;
-
-    /// Mark item as completed
-    pub async fn mark_completed(db: &mongodb::Database, id: ObjectId) -> Result<(), BotError> {
-        let collection: Collection<JobBlp> = db.collection(Self::COLLECTION);
-        let now = Bson::DateTime(bson::DateTime::now());
-
-        collection
-            .update_one(
-                doc! { "_id": id },
-                doc! {
-                    "$set": {
-                        "status": "completed",
-                        "completed_at": now
-                    }
-                },
-            )
-            .await?;
-
-        Ok(())
-    }
-
-    /// Mark item as failed and increment retry count
-    pub async fn mark_failed(
-        db: &mongodb::Database,
-        id: ObjectId,
-        error: String,
-    ) -> Result<(), BotError> {
-        let collection: Collection<JobBlp> = db.collection(Self::COLLECTION);
-        let now = Bson::DateTime(bson::DateTime::now());
-
-        collection
-            .update_one(
-                doc! { "_id": id },
-                doc! {
-                    "$set": {
-                        "status": "failed",
-                        "error": error,
-                        "completed_at": now
-                    },
-                    "$inc": { "retry_count": 1 }
-                },
-            )
-            .await?;
-
-        Ok(())
-    }
-
-    /// Reset stuck processing items (e.g., after service restart)
-    pub async fn reset_stuck_items(
-        db: &mongodb::Database,
-        timeout_minutes: i64,
-    ) -> Result<u64, BotError> {
-        let collection: Collection<JobBlp> = db.collection(Self::COLLECTION);
-
-        let threshold = Utc::now() - chrono::Duration::minutes(timeout_minutes);
-        let threshold_bson =
-            Bson::DateTime(bson::DateTime::from_millis(threshold.timestamp_millis()));
-
-        let result = collection
-            .update_many(
-                doc! {
-                    "status": "processing",
-                    "started_at": { "$lt": threshold_bson }
-                },
-                doc! {
-                    "$set": {
-                        "status": "pending",
-                        "worker_id": null
-                    },
-                    "$inc": { "retry_count": 1 }
-                },
-            )
-            .await?;
-
-        Ok(result.modified_count)
-    }
 
     /// Count pending items
     #[allow(dead_code)]

@@ -10,11 +10,6 @@ use std::env;
 use std::path::Path;
 use tokio::time::Duration;
 
-// Number of concurrent BLP processing workers
-const BLP_WORKER_COUNT: usize = 3;
-// Number of concurrent rembg processing workers
-const REMBG_WORKER_COUNT: usize = 3;
-
 /// Download ONNX Runtime and AI models
 async fn download_models_and_runtime() -> Result<(), BotError> {
     use std::process::Command;
@@ -200,11 +195,6 @@ async fn main() -> Result<(), BotError> {
         .expect("MONGO_DB not set at compile time or runtime");
 
     state::init_bot_state(token, &mongo_url, &mongo_db).await?;
-
-    // Reset stuck BLP queue items from previous run
-    let db = state::db().await;
-
-    workers::blp::job::JobBlp::reset_stuck_items(&*db, 10).await?;
 
     // Setup SIGUSR1 signal handler for command reregistration
     tokio::spawn(async {

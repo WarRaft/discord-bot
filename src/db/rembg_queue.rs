@@ -1,4 +1,4 @@
-use crate::discord::message::message::Attachment;
+use crate::discord::message::attachment::Attachment;
 use crate::error::BotError;
 use crate::workers::queue::QueueStatus;
 use bson::serde_helpers::datetime;
