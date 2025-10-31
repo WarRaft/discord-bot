@@ -1,8 +1,8 @@
 use crate::discord::message::message::Message;
 use crate::error::BotError;
 use crate::state;
-use serde::Serialize;
 use crate::workers::blp::job::ConversionTarget;
+use serde::Serialize;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub enum CommandKind {
@@ -17,7 +17,7 @@ pub struct CommandArgs {
     pub quality: u8,   // 1..=100 for BLP
     pub threshold: u8, // 0..=255 for REMBG
     pub zip: bool,
-    pub mode: bool,
+    pub binary: bool,
     pub mask: bool,
 }
 
@@ -28,7 +28,7 @@ impl Default for CommandArgs {
             quality: 80,
             threshold: 160,
             zip: false,
-            mode: false,
+            binary: false,
             mask: false,
         }
     }
@@ -57,7 +57,7 @@ pub fn parse_command_args(content: &str, _bot_id: &str) -> Option<CommandArgs> {
     for &tok in &tokens[1..] {
         match tok {
             "zip" => args.zip = true,
-            "binary" => args.mode = true,
+            "binary" => args.binary = true,
             "mask" => args.mask = true,
             _ => {
                 if let Ok(num) = tok.parse::<u16>() {

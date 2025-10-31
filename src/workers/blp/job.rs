@@ -54,7 +54,7 @@ pub enum ConversionTarget {
 
 impl JobBlp {
     pub const COLLECTION: &'static str = "discord_command_blp";
-    pub(crate) const MAX_RETRIES: u32 = 3;
+    pub const MAX_RETRIES: u32 = 3;
 
     /// Count pending items
     #[allow(dead_code)]

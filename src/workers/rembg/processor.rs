@@ -7,19 +7,33 @@ use crate::workers::blp::job::{ConversionTarget, JobBlp};
 use crate::workers::processor::{TaskProcessor, notify_workers};
 use crate::workers::queue::QueueStatus;
 use async_trait::async_trait;
+use blp::core::decode::decode_to_rgba;
 use blp::core::image::ImageBlp;
 use bson::{Bson, doc, serialize_to_bson};
-use image::{DynamicImage, ImageFormat};
+use image::{DynamicImage, ImageFormat, RgbImage, RgbaImage};
 use mongodb::Collection;
+use once_cell::sync::Lazy;
+use rembg_rs::manager::ModelManager;
+use rembg_rs::options::RemovalOptions;
+use rembg_rs::rembg::rembg;
 use reqwest::Method;
 use std::io::{Cursor, Write};
+use std::path::Path;
+use std::sync::Arc;
 use zip::ZipWriter;
 use zip::write::FileOptions;
 
-pub struct BlpProcessor;
+pub static MODEL_MANAGER: Lazy<Arc<ModelManager>> = Lazy::new(|| {
+    let path = Path::new("models/u2net.onnx");
+    let mgr = ModelManager::from_file(path)
+        .unwrap_or_else(|e| panic!("❌ Failed to initialize model manager: {}", e));
+    Arc::new(mgr)
+});
+
+pub struct RembgProcessor;
 #[async_trait]
-impl TaskProcessor for BlpProcessor {
-    const POOL: &'static str = "blp";
+impl TaskProcessor for RembgProcessor {
+    const POOL: &'static str = "rembg";
 
     async fn process_queue_item() -> Result<bool, BotError> {
         let db = state::db().await;
@@ -65,7 +79,6 @@ impl TaskProcessor for BlpProcessor {
                             "$set": {
                                 JobBlp::REPLY: serialize_to_bson(&reply_msg)?,
                                 JobBlp::STATUS: QueueStatus::Completed.as_ref(),
-                                JobBlp::COMPLETED: Bson::DateTime(bson::DateTime::now())
                             },
                         },
                     )
@@ -102,7 +115,7 @@ impl TaskProcessor for BlpProcessor {
                     .await?;
             }
 
-            notify_workers::<BlpProcessor>();
+            notify_workers::<RembgProcessor>();
             return Ok(true);
         };
 
@@ -273,7 +286,43 @@ impl TaskProcessor for BlpProcessor {
             )
             .await?;
 
-        notify_workers::<BlpProcessor>();
+        notify_workers::<RembgProcessor>();
         Ok(true)
     }
+}
+
+pub async fn process_single_image(
+    image_bytes: &[u8],
+    options: &RemovalOptions,
+) -> Result<(Vec<u8>, Vec<u8>), BotError> {
+    // Decode input to RGBA image
+    let img = decode_to_rgba(image_bytes)?;
+
+    // Get global model manager
+    let manager = Arc::clone(&MODEL_MANAGER);
+
+    // Run background removal
+    let result = rembg(&*manager, img, options)?;
+
+    // Extract images
+    let img: &RgbaImage = result.image();
+    let mask_img: &RgbImage = result.mask();
+
+    // Encode result to PNG bytes
+    let mut buf_image = Vec::new();
+    let mut buf_mask = Vec::new();
+
+    // Rgba → PNG
+    {
+        let dyn_img = DynamicImage::ImageRgba8(img.clone());
+        dyn_img.write_to(&mut Cursor::new(&mut buf_image), ImageFormat::Png)?;
+    }
+
+    // Mask → PNG
+    {
+        let dyn_mask = DynamicImage::ImageRgb8(mask_img.clone());
+        dyn_mask.write_to(&mut Cursor::new(&mut buf_mask), ImageFormat::Png)?;
+    }
+
+    Ok((buf_image, buf_mask))
 }

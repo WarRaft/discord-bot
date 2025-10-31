@@ -1,9 +1,8 @@
 use crate::commands::{Command, SlashCommand};
 use crate::discord::api;
+use crate::discord::discord::Interaction;
 use crate::error::BotError;
 use crate::state;
-use crate::discord::discord::Interaction;
-use crate::workers::rembg::processor1::is_rembg_available;
 
 pub struct Rembg;
 
@@ -22,13 +21,7 @@ impl Command for Rembg {
         let db = state::db().await;
 
         // Check if rembg is available
-        let availability_warning = if !is_rembg_available() {
-            "⚠️ **Background removal is currently unavailable**\n\
-ONNX Runtime is not installed on the server.\n\
-Contact the administrator to run: `./signal-download-models.sh`\n\n"
-        } else {
-            ""
-        };
+        let availability_warning = "";
 
         // Check bot permissions in this channel
         let permissions_info = if let Some(channel_id) = &interaction.channel_id {
@@ -38,7 +31,7 @@ Contact the administrator to run: `./signal-download-models.sh`\n\n"
         };
 
         // Get queue statistics
-        let queue_info = match crate::db::rembg_queue::RembgQueueItem::count_total(&db).await {
+        let queue_info = match crate::workers::rembg::job::JobRembg::count_total(&db).await {
             Ok(count) => {
                 if count > 0 {
                     format!(
