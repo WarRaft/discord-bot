@@ -1,5 +1,5 @@
-use serde::{Deserialize, Serialize};
 use crate::discord::message::attachment::Attachment;
+use serde::{Deserialize, Serialize};
 
 /// https://discord.com/developers/docs/resources/message
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]

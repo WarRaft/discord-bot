@@ -226,3 +226,10 @@ impl From<tokio::task::JoinError> for BotError {
         BotError::new("zip").push_std(e)
     }
 }
+
+impl From<bson::error::Error> for BotError {
+    #[track_caller]
+    fn from(e: bson::error::Error) -> Self {
+        BotError::new("bson").push_std(e)
+    }
+}

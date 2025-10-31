@@ -8,7 +8,7 @@ use crate::workers::processor::{TaskProcessor, notify_workers};
 use crate::workers::queue::QueueStatus;
 use async_trait::async_trait;
 use blp::core::image::ImageBlp;
-use bson::{Bson, doc};
+use bson::{Bson, doc, serialize_to_bson};
 use image::{DynamicImage, ImageFormat};
 use mongodb::Collection;
 use reqwest::Method;
@@ -17,7 +17,6 @@ use zip::ZipWriter;
 use zip::write::FileOptions;
 
 pub struct BlpProcessor;
-
 #[async_trait]
 impl TaskProcessor for BlpProcessor {
     const POOL: &'static str = "blp";
@@ -64,7 +63,7 @@ impl TaskProcessor for BlpProcessor {
                         doc! { "_id": &job.id },
                         doc! {
                             "$set": {
-                                JobBlp::REPLY: &reply_msg.id,
+                                JobBlp::REPLY: serialize_to_bson(&reply_msg)?,
                                 JobBlp::STATUS: QueueStatus::Completed.as_ref(),
                             },
                         },
@@ -94,7 +93,7 @@ impl TaskProcessor for BlpProcessor {
                         doc! { "_id": &job.id },
                         doc! {
                             "$set": {
-                                JobBlp::REPLY: &reply_msg.id,
+                                JobBlp::REPLY: serialize_to_bson(&reply_msg)?,
                                 JobBlp::STATUS: QueueStatus::Pending.as_ref(),
                             },
                         },
