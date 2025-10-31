@@ -3,9 +3,10 @@ use crate::discord::message::message::MessageReference;
 use crate::discord::message::send::MessageSend;
 use crate::error::BotError;
 use crate::state;
-use crate::workers::blp::job::{ConversionTarget, JobBlp};
+use crate::workers::blp::job::ConversionTarget;
 use crate::workers::processor::{TaskProcessor, notify_workers};
 use crate::workers::queue::QueueStatus;
+use crate::workers::rembg::job::JobRembg;
 use async_trait::async_trait;
 use blp::core::decode::decode_to_rgba;
 use blp::core::image::ImageBlp;
@@ -37,21 +38,21 @@ impl TaskProcessor for RembgProcessor {
 
     async fn process_queue_item() -> Result<bool, BotError> {
         let db = state::db().await;
-        let collection: Collection<JobBlp> = db.collection(JobBlp::COLLECTION);
+        let collection: Collection<JobRembg> = db.collection(JobRembg::COLLECTION);
 
         let result = collection
             .find_one_and_update(
                 doc! {
-                    JobBlp::STATUS: QueueStatus::Pending.as_ref(),
-                    JobBlp::RETRY: { "$lt": JobBlp::MAX_RETRIES }
+                    JobRembg::STATUS: QueueStatus::Pending.as_ref(),
+                    JobRembg::RETRY: { "$lt": JobRembg::MAX_RETRIES }
                 },
                 doc! {
                     "$set": {
-                        JobBlp::STATUS: QueueStatus::Processing.as_ref()
+                        JobRembg::STATUS: QueueStatus::Processing.as_ref()
                     }
                 },
             )
-            .sort(doc! { JobBlp::CREATED: 1 })
+            .sort(doc! { JobRembg::CREATED: 1 })
             .return_document(mongodb::options::ReturnDocument::After)
             .await?;
 
@@ -77,8 +78,8 @@ impl TaskProcessor for RembgProcessor {
                         doc! { "_id": &job.id },
                         doc! {
                             "$set": {
-                                JobBlp::REPLY: serialize_to_bson(&reply_msg)?,
-                                JobBlp::STATUS: QueueStatus::Completed.as_ref(),
+                                JobRembg::REPLY: serialize_to_bson(&reply_msg)?,
+                                JobRembg::STATUS: QueueStatus::Completed.as_ref(),
                             },
                         },
                     )
@@ -86,12 +87,8 @@ impl TaskProcessor for RembgProcessor {
             } else {
                 let reply_msg = MessageSend {
                     content: Some(format!(
-                        "✅ Added {} image(s) to conversion queue {}\n⏳ Processing...",
+                        "✅ Added {} image(s) to conversion queue \n⏳ Processing...",
                         job.message.attachments.len(),
-                        match job.target {
-                            ConversionTarget::BLP => format!("to BLP (quality: {})", job.quality),
-                            ConversionTarget::PNG => "to PNG".to_string(),
-                        }
                     )),
                     message_reference: Some(MessageReference {
                         message_id: Some(job.message.id.clone()),
@@ -107,8 +104,8 @@ impl TaskProcessor for RembgProcessor {
                         doc! { "_id": &job.id },
                         doc! {
                             "$set": {
-                                JobBlp::REPLY: serialize_to_bson(&reply_msg)?,
-                                JobBlp::STATUS: QueueStatus::Pending.as_ref(),
+                                JobRembg::REPLY: serialize_to_bson(&reply_msg)?,
+                                JobRembg::STATUS: QueueStatus::Pending.as_ref(),
                             },
                         },
                     )
@@ -272,15 +269,15 @@ impl TaskProcessor for RembgProcessor {
             .await?;
         }
 
-        let collection: Collection<JobBlp> = db.collection(JobBlp::COLLECTION);
+        let collection: Collection<JobRembg> = db.collection(JobRembg::COLLECTION);
 
         collection
             .update_one(
                 doc! { "_id": job.id.unwrap() },
                 doc! {
                     "$set": {
-                        JobBlp::STATUS: QueueStatus::Completed.as_ref(),
-                        JobBlp::COMPLETED: Bson::DateTime(bson::DateTime::now())
+                        JobRembg::STATUS: QueueStatus::Completed.as_ref(),
+                        JobRembg::COMPLETED: Bson::DateTime(bson::DateTime::now())
                     }
                 },
             )

@@ -42,8 +42,8 @@ pub struct JobRembg {
 }
 
 impl JobRembg {
-    const COLLECTION: &'static str = "discord_command_rembg";
-    const MAX_RETRIES: u32 = 3;
+    pub(crate) const COLLECTION: &'static str = "discord_command_rembg";
+    pub(crate) const MAX_RETRIES: u32 = 3;
 
     /// Count total number of rembg tasks
     pub async fn count_total(db: &mongodb::Database) -> Result<u64, BotError> {
