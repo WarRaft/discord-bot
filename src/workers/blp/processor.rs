@@ -7,7 +7,9 @@ use crate::workers::blp::job::{ConversionTarget, JobBlp};
 use crate::workers::processor::{TaskProcessor, notify_workers};
 use crate::workers::queue::QueueStatus;
 use async_trait::async_trait;
+use blp::core::image::ImageBlp;
 use bson::{Bson, doc};
+use image::{DynamicImage, ImageFormat};
 use mongodb::Collection;
 use reqwest::Method;
 use std::io::{Cursor, Write};
@@ -45,7 +47,6 @@ impl TaskProcessor for BlpProcessor {
         };
 
         let Some(ref reply) = job.reply else {
-            // если нет вложений — сразу ответ и Complete
             if job.message.attachments.is_empty() {
                 let reply_msg = MessageSend {
                     content: Some("❌ No attachments found — nothing to convert.".to_string()),
@@ -70,7 +71,6 @@ impl TaskProcessor for BlpProcessor {
                     )
                     .await?;
             } else {
-                // иначе — обычный сценарий
                 let reply_msg = MessageSend {
                     content: Some(format!(
                         "✅ Added {} image(s) to conversion queue {}\n⏳ Processing...",
@@ -110,22 +110,11 @@ impl TaskProcessor for BlpProcessor {
             .download_all(4)
             .await;
 
-        // Process attachments
         let mut converted_files = Vec::new();
-        let mut filename_counts = std::collections::HashMap::new();
 
         for attachment_memory in attachment {
             if let Some(ref error) = attachment_memory.error {
-                // Create error text file instead of failing the whole batch
-                let mut error_filename = format!("{}.error.txt", attachment_memory.filename_stem);
-
-                // Handle duplicate error filenames too
-                let count = filename_counts.entry(error_filename.clone()).or_insert(0);
-                *count += 1;
-                if *count > 1 {
-                    error_filename =
-                        format!("{}.error_{}.txt", attachment_memory.filename_stem, count);
-                }
+                let error_filename = format!("{}.error.txt", attachment_memory.filename_stem);
 
                 let error_content = format!(
                     "Error downloading file: {}\n\nError details:\n{}\n\nTimestamp: {}",
@@ -139,23 +128,16 @@ impl TaskProcessor for BlpProcessor {
 
             let result: Result<(String, Vec<u8>), BotError> = match job.target {
                 ConversionTarget::BLP => {
-                    // Generate output filename
                     let output_filename = format!("{}.blp", attachment_memory.filename_stem);
 
-                    // Convert to BLP in memory using blp-rs
                     let blp_bytes = tokio::task::spawn_blocking({
                         let image_data = attachment_memory.bytes.to_vec();
                         move || {
-                            use blp::core::image::ImageBlp;
-
-                            // Parse image
                             let mut img = ImageBlp::from_buf(&image_data)?;
 
-                            // Decode with all mips enabled
                             let mip_visible = vec![true; 16];
                             img.decode(&image_data, &mip_visible)?;
 
-                            // Encode to BLP (returns Ctx with bytes in memory)
                             let ctx = img.encode_blp(job.quality, &mip_visible)?;
 
                             Ok::<_, blp::error::error::BlpError>(ctx.bytes)
@@ -166,17 +148,11 @@ impl TaskProcessor for BlpProcessor {
                     Ok((output_filename, blp_bytes))
                 }
                 ConversionTarget::PNG => {
-                    // Generate output filename (replace .blp with .png)
                     let output_filename = format!("{}.png", attachment_memory.filename_stem);
 
-                    // Convert BLP → PNG in memory using blp-rs
                     let png_bytes = tokio::task::spawn_blocking({
                         let blp_data = attachment_memory.bytes.to_vec();
                         move || {
-                            use blp::core::image::ImageBlp;
-                            use image::{DynamicImage, ImageFormat};
-
-                            // Parse BLP
                             let mut img = ImageBlp::from_buf(&blp_data)?;
 
                             // Decode only first mip level
@@ -188,17 +164,14 @@ impl TaskProcessor for BlpProcessor {
                                 ],
                             )?;
 
-                            // Get first mipmap
-                            let mipmap = img
+                            let rgba = img
                                 .mipmaps
                                 .get(0)
-                                .ok_or_else(|| blp::error::error::BlpError::new("no_mipmap"))?;
-                            let rgba = mipmap
+                                .ok_or_else(|| blp::error::error::BlpError::new("no_mipmap"))?
                                 .image
                                 .as_ref()
                                 .ok_or_else(|| blp::error::error::BlpError::new("no_image_data"))?;
 
-                            // Encode to PNG in memory
                             let mut png_buffer = Cursor::new(Vec::new());
                             DynamicImage::ImageRgba8(rgba.clone())
                                 .write_to(&mut png_buffer, ImageFormat::Png)?;
@@ -213,32 +186,11 @@ impl TaskProcessor for BlpProcessor {
             };
 
             match result {
-                Ok((mut filename, bytes)) => {
-                    // Handle duplicate filenames
-                    let count = filename_counts.entry(filename.clone()).or_insert(0);
-                    *count += 1;
-                    if *count > 1 {
-                        let (name, ext) = if let Some(dot_pos) = filename.rfind('.') {
-                            (filename[..dot_pos].to_string(), &filename[dot_pos..])
-                        } else {
-                            (filename.clone(), "")
-                        };
-                        filename = format!("{}_{}{}", name, count, ext);
-                    }
+                Ok((filename, bytes)) => {
                     converted_files.push((filename, bytes));
                 }
                 Err(e) => {
-                    // Create error text file instead of failing the whole batch
-                    let mut error_filename =
-                        format!("{}.error.txt", attachment_memory.filename_stem);
-
-                    // Handle duplicate error filenames too
-                    let count = filename_counts.entry(error_filename.clone()).or_insert(0);
-                    *count += 1;
-                    if *count > 1 {
-                        error_filename =
-                            format!("{}.error_{}.txt", attachment_memory.filename_stem, count);
-                    }
+                    let error_filename = format!("{}.error.txt", attachment_memory.filename_stem);
 
                     let error_content = format!(
                         "Error converting file: {}\n\nError details:\n{:?}\n\nTimestamp: {}",
@@ -247,19 +199,12 @@ impl TaskProcessor for BlpProcessor {
                         chrono::Utc::now().format("%Y-%m-%d %H:%M:%S UTC")
                     );
                     converted_files.push((error_filename, error_content.into_bytes()));
-
-                    eprintln!(
-                        "[ERROR] Failed to convert {}: {:?}",
-                        attachment_memory.meta.filename, e
-                    );
-                    // Continue processing other files instead of returning error
                 }
             }
         }
 
         // Send response
         {
-            // Calculate conversion time
             let conversion_time = format!(
                 "{:.2}s",
                 chrono::Utc::now()
@@ -268,9 +213,7 @@ impl TaskProcessor for BlpProcessor {
                     / 1000.0
             );
 
-            // Prepare files for sending - either as ZIP or individual files
             let files_to_send = if job.zip {
-                // Create ZIP archive (even for single files if requested)
                 let mut zip_buffer = Vec::new();
                 {
                     let cursor = Cursor::new(&mut zip_buffer);
@@ -294,7 +237,6 @@ impl TaskProcessor for BlpProcessor {
                 converted_files.clone()
             };
 
-            // Edit the status message (PATCH instead of POST)
             let format_desc = match job.target {
                 ConversionTarget::BLP => {
                     format!("to BLP (quality: {})", job.quality)
@@ -317,7 +259,6 @@ impl TaskProcessor for BlpProcessor {
             .await?;
         }
 
-        // Mark job as completed
         let collection: Collection<JobBlp> = db.collection(JobBlp::COLLECTION);
 
         collection
