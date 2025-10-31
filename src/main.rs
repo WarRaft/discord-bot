@@ -5,10 +5,10 @@ mod error;
 mod state;
 mod workers;
 
+use crate::error::BotError;
 use std::env;
 use std::path::Path;
 use tokio::time::Duration;
-use crate::error::BotError;
 
 // Number of concurrent BLP processing workers
 const BLP_WORKER_COUNT: usize = 3;
@@ -200,17 +200,11 @@ async fn main() -> Result<(), BotError> {
         .expect("MONGO_DB not set at compile time or runtime");
 
     state::init_bot_state(token, &mongo_url, &mongo_db).await?;
-    
+
     // Reset stuck BLP queue items from previous run
     let db = state::db().await;
-    
-    db::blp_queue::BlpQueueItem::reset_stuck_items(&*db, 10).await?;
 
-    // Start BLP worker pool
-    workers::start_blp_workers(BLP_WORKER_COUNT);
-
-    // Start rembg worker pool (only if initialized)
-    workers::start_rembg_workers(REMBG_WORKER_COUNT);
+    workers::blp::job::JobBlp::reset_stuck_items(&*db, 10).await?;
 
     // Setup SIGUSR1 signal handler for command reregistration
     tokio::spawn(async {

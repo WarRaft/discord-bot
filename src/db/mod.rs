@@ -1,4 +1,3 @@
-pub mod blp_queue;
 pub mod heartbeat;
 pub mod mongo;
 pub mod rate_limits;

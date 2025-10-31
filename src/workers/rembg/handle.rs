@@ -5,6 +5,7 @@ use crate::discord::message::send::MessageSend;
 use crate::error::BotError;
 use crate::state;
 use reqwest::Method;
+use crate::workers::rembg::processor1::is_rembg_available;
 
 /// Handle rembg (background removal) command
 pub async fn handle(message: Message, arg: &CommandArgs) -> Result<(), BotError> {
@@ -14,7 +15,7 @@ pub async fn handle(message: Message, arg: &CommandArgs) -> Result<(), BotError>
     }
 
     // Check if rembg is available
-    if !crate::workers::is_rembg_available() {
+    if !is_rembg_available() {
         MessageSend {
             content: Some("❌ **Background removal is currently unavailable**\n\nONNX Runtime is not installed on the server.\nPlease contact the administrator to run: `./signal-download-models.sh`".to_string()),
             message_reference: Some(MessageReference {
@@ -49,15 +50,15 @@ pub async fn handle(message: Message, arg: &CommandArgs) -> Result<(), BotError>
         status_message.id,
         message.attachments,
         arg.threshold,
-        arg.binary_mode,
-        arg.include_mask,
-        arg.should_zip,
+        arg.mode,
+        arg.mask,
+        arg.zip,
     )
     .insert(&*db)
     .await?;
 
     // Notify workers that a new task is available
-    crate::workers::notify_rembg_task();
+    //crate::workers::notify_rembg_task();
 
     Ok(())
 }

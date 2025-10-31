@@ -1,8 +1,8 @@
-use crate::db::blp_queue::ConversionType;
 use crate::discord::message::message::Message;
 use crate::error::BotError;
 use crate::state;
 use serde::Serialize;
+use crate::workers::blp::job::ConversionTarget;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub enum CommandKind {
@@ -16,9 +16,9 @@ pub struct CommandArgs {
     pub kind: CommandKind,
     pub quality: u8,   // 1..=100 for BLP
     pub threshold: u8, // 0..=255 for REMBG
-    pub should_zip: bool,
-    pub binary_mode: bool,
-    pub include_mask: bool,
+    pub zip: bool,
+    pub mode: bool,
+    pub mask: bool,
 }
 
 impl Default for CommandArgs {
@@ -27,9 +27,9 @@ impl Default for CommandArgs {
             kind: CommandKind::Png,
             quality: 80,
             threshold: 160,
-            should_zip: false,
-            binary_mode: false,
-            include_mask: false,
+            zip: false,
+            mode: false,
+            mask: false,
         }
     }
 }
@@ -56,9 +56,9 @@ pub fn parse_command_args(content: &str, _bot_id: &str) -> Option<CommandArgs> {
 
     for &tok in &tokens[1..] {
         match tok {
-            "zip" => args.should_zip = true,
-            "binary" => args.binary_mode = true,
-            "mask" => args.include_mask = true,
+            "zip" => args.zip = true,
+            "binary" => args.mode = true,
+            "mask" => args.mask = true,
             _ => {
                 if let Ok(num) = tok.parse::<u16>() {
                     match args.kind {
@@ -90,10 +90,10 @@ pub async fn handle_message(message: Message) -> Result<(), BotError> {
 
     match args.kind {
         CommandKind::Blp => {
-            crate::workers::blp::handle::handle(message, ConversionType::ToBLP, args).await
+            crate::workers::blp::handle::handle(message, ConversionTarget::BLP, args).await
         }
         CommandKind::Png => {
-            crate::workers::blp::handle::handle(message, ConversionType::ToPNG, args).await
+            crate::workers::blp::handle::handle(message, ConversionTarget::PNG, args).await
         }
         CommandKind::Rembg => {
             crate::workers::rembg::handle::handle(message, &args).await // 

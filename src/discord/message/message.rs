@@ -1,7 +1,8 @@
 use serde::{Deserialize, Serialize};
+use crate::discord::message::attachment::Attachment;
 
 /// https://discord.com/developers/docs/resources/message
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Default, Clone, Serialize, Deserialize)]
 pub struct Message {
     pub id: String,
     pub author: User,
@@ -15,7 +16,7 @@ pub struct Message {
 }
 
 /// https://discord.com/developers/docs/resources/message#message-reference-structure
-#[derive(Debug, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct MessageReference {
     #[serde(rename = "type")]
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -28,14 +29,6 @@ pub struct MessageReference {
     pub guild_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub fail_if_not_exists: Option<bool>,
-}
-
-/// https://discord.com/developers/docs/resources/message#attachment-object
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Attachment {
-    pub id: String,
-    pub url: String,
-    pub filename: String,
 }
 
 /// https://discord.com/developers/docs/resources/user#user-object

@@ -1,60 +1,32 @@
-use crate::db::blp_queue::{BlpQueueItem, ConversionType};
 use crate::discord::message::handle::CommandArgs;
-use crate::discord::message::message::{Message, MessageReference};
-use crate::discord::message::send::MessageSend;
+use crate::discord::message::message::Message;
 use crate::error::BotError;
 use crate::state;
-use reqwest::Method;
+use crate::workers::blp::job::{ConversionTarget, JobBlp};
+use crate::workers::blp::processor::BlpProcessor;
+use crate::workers::processor::notify_workers;
+use mongodb::Collection;
 
-/// Handle BLP/PNG conversion commands extracted from `handle_message`.
 pub async fn handle(
     message: Message,
-    conversion_type: ConversionType,
+    target: ConversionTarget,
     args: CommandArgs,
 ) -> Result<(), BotError> {
-    // Check if there are attachments
-    if message.attachments.is_empty() {
-        return Ok(());
-    }
-
-    let format_desc = match conversion_type {
-        ConversionType::ToBLP => format!("to BLP (quality: {})", args.quality),
-        ConversionType::ToPNG => "to PNG".to_string(),
-    };
-
-    let status_message = MessageSend {
-        content: Some(format!(
-            "✅ Added {} image(s) to conversion queue {}\n⏳ Processing...",
-            message.attachments.len(),
-            format_desc
-        )),
-        message_reference: Some(MessageReference {
-            message_id: Some(message.id.clone()), //
-            ..Default::default()
-        }),
-    }
-    .send(Method::POST, &message.channel_id)
-    .await?;
-
     let db = state::db().await;
+    let collection: Collection<JobBlp> = db.collection(JobBlp::COLLECTION);
 
-    BlpQueueItem::new(
-        message.author.id.clone(),
-        message.channel_id.clone(),
-        message.id.clone(),
-        String::new(), // No interaction_id for messages
-        String::new(), // No interaction_token for messages
-        message.attachments,
-        conversion_type,
-        args.quality,
-        args.should_zip,
-        Some(status_message.id),
-    )
-    .insert(&*db)
-    .await?;
+    collection
+        .insert_one(JobBlp {
+            message,
+            target,
+            quality: args.quality,
+            zip: args.zip,
+            created: chrono::Utc::now(),
+            ..Default::default()
+        })
+        .await?;
 
-    // Notify workers that a new task is available
-    crate::workers::notify_blp_task();
+    notify_workers::<BlpProcessor>();
 
     Ok(())
 }

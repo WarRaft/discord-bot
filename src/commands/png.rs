@@ -28,9 +28,9 @@ impl Command for Png {
         };
 
         // Get queue statistics for PNG conversion
-        let queue_info = match crate::db::blp_queue::BlpQueueItem::count_total_by_type(
+        let queue_info = match crate::workers::blp::job::JobBlp::count_total_by_type(
             &db,
-            crate::db::blp_queue::ConversionType::ToPNG,
+            crate::workers::blp::job::ConversionTarget::PNG,
         )
         .await
         {
