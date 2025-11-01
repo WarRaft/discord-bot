@@ -1,5 +1,6 @@
 mod ahoy;
 mod blp;
+mod icon;
 mod png;
 mod rembg;
 
@@ -29,6 +30,7 @@ pub fn all_commands() -> Vec<SlashCommand> {
     vec![
         ahoy::Ahoy::definition(),
         blp::Blp::definition(),
+        icon::Icon::definition(),
         png::Png::definition(),
         rembg::Rembg::definition(),
     ]
@@ -48,6 +50,7 @@ pub async fn handle_interaction(interaction: Interaction) -> Result<(), BotError
     match data.name.as_str() {
         "ahoy" => ahoy::Ahoy::handle(interaction).await,
         "blp" => blp::Blp::handle(interaction).await,
+        "icon" => icon::Icon::handle(interaction).await,
         "png" => png::Png::handle(interaction).await,
         "rembg" => rembg::Rembg::handle(interaction).await,
         _ => Ok(()), // Unknown command, ignore

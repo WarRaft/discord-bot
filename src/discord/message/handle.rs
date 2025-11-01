@@ -9,6 +9,7 @@ pub enum CommandKind {
     Blp,
     Png,
     Rembg, // includes "rembg" and "bg" aliases
+    Icon,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -51,6 +52,7 @@ pub fn parse_command_args(content: &str, _bot_id: &str) -> Option<CommandArgs> {
         "blp" => CommandKind::Blp,
         "png" => CommandKind::Png,
         "rembg" | "bg" => CommandKind::Rembg,
+        "icon" => CommandKind::Icon,
         _ => return None,
     };
 
@@ -96,7 +98,10 @@ pub async fn handle_message(message: Message) -> Result<(), BotError> {
             crate::workers::blp::handle::handle(message, ConversionTarget::PNG, args).await
         }
         CommandKind::Rembg => {
-            crate::workers::rembg::handle::handle(message, &args).await // 
+            crate::workers::rembg::handle::handle(message, &args).await //
+        }
+        CommandKind::Icon => {
+            crate::workers::icon::handle::handle(message, &args).await
         }
     }
 }
