@@ -19,14 +19,15 @@ use reqwest::Method;
 use std::io::{Cursor, Write};
 use std::path::Path;
 use std::sync::Arc;
+use tokio::sync::Mutex;
 use zip::ZipWriter;
 use zip::write::FileOptions;
 
-pub static MODEL_MANAGER: Lazy<Arc<ModelManager>> = Lazy::new(|| {
+pub static MODEL_MANAGER: Lazy<Arc<Mutex<ModelManager>>> = Lazy::new(|| {
     let path = Path::new("models/u2net.onnx");
     let mgr = ModelManager::from_file(path)
         .unwrap_or_else(|e| panic!("❌ Failed to initialize model manager: {}", e));
-    Arc::new(mgr)
+    Arc::new(Mutex::new(mgr))
 });
 
 pub struct RembgProcessor;
@@ -146,9 +147,10 @@ impl TaskProcessor for RembgProcessor {
 
                 // Get global model manager
                 let manager = Arc::clone(&MODEL_MANAGER);
+                let mut manager_lock = manager.lock().await;
 
                 // Run background removal
-                let removal_result = rembg(&*manager, img, &options)?;
+                let removal_result = rembg(&mut *manager_lock, img, &options)?;
 
                 // Extract images
                 let img: &RgbaImage = removal_result.image();
