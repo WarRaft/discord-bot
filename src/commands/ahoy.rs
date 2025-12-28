@@ -12,6 +12,7 @@ impl Command for Ahoy {
             name: "ahoy".to_string(),
             command_type: 1,
             description: "A pirate greeting".to_string(),
+            options: None,
         }
     }
 

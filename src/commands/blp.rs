@@ -12,6 +12,7 @@ impl Command for Blp {
             name: "blp".to_string(),
             command_type: 1,
             description: "Information about BLP image conversion".to_string(),
+            options: None,
         }
     }
 

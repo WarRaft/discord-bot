@@ -3,6 +3,8 @@ mod blp;
 mod icon;
 mod png;
 mod rembg;
+mod raw2i;
+mod i2raw;
 
 use crate::error::{BotError};
 use crate::discord::discord::Interaction;
@@ -14,6 +16,17 @@ pub struct SlashCommand {
     #[serde(rename = "type")]
     pub command_type: u8,
     pub description: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub options: Option<Vec<SlashCommandOption>>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct SlashCommandOption {
+    pub name: String,
+    pub description: String,
+    #[serde(rename = "type")]
+    pub option_type: u8,
+    pub required: bool,
 }
 
 /// Trait for Discord slash commands
@@ -33,6 +46,8 @@ pub fn all_commands() -> Vec<SlashCommand> {
         icon::Icon::definition(),
         png::Png::definition(),
         rembg::Rembg::definition(),
+        raw2i::Raw2i::definition(),
+        i2raw::I2raw::definition(),
     ]
 }
 
@@ -53,6 +68,8 @@ pub async fn handle_interaction(interaction: Interaction) -> Result<(), BotError
         "icon" => icon::Icon::handle(interaction).await,
         "png" => png::Png::handle(interaction).await,
         "rembg" => rembg::Rembg::handle(interaction).await,
+        "raw2i" => raw2i::Raw2i::handle(interaction).await,
+        "i2raw" => i2raw::I2raw::handle(interaction).await,
         _ => Ok(()), // Unknown command, ignore
     }
 }

@@ -12,6 +12,7 @@ impl Command for Icon {
             name: "icon".to_string(),
             command_type: 1,
             description: "Information about icon conversion".to_string(),
+            options: None,
         }
     }
 

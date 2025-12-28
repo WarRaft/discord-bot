@@ -113,6 +113,14 @@ pub struct InteractionMessage {
 pub struct InteractionData {
     pub name: String,
     pub resolved: Option<InteractionResolved>,
+    pub options: Option<Vec<InteractionOption>>,
+}
+
+#[allow(dead_code)]
+#[derive(Debug, Deserialize)]
+pub struct InteractionOption {
+    pub name: String,
+    pub value: Option<Value>,
 }
 
 #[allow(dead_code)]

@@ -12,6 +12,7 @@ impl Command for Rembg {
             name: "rembg".to_string(),
             command_type: 1,
             description: "Information about background removal".to_string(),
+            options: None,
         }
     }
 

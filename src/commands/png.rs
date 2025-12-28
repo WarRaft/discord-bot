@@ -12,6 +12,7 @@ impl Command for Png {
             name: "png".to_string(),
             command_type: 1,
             description: "Information about PNG image conversion".to_string(),
+            options: None,
         }
     }
 
