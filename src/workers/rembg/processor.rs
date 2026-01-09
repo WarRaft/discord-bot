@@ -23,12 +23,26 @@ use tokio::sync::Mutex;
 use zip::ZipWriter;
 use zip::write::FileOptions;
 
-pub static MODEL_MANAGER: Lazy<Arc<Mutex<ModelManager>>> = Lazy::new(|| {
+pub static MODEL_MANAGER: Lazy<Result<Arc<Mutex<ModelManager>>, String>> = Lazy::new(|| {
     let path = Path::new("models/u2net.onnx");
-    let mgr = ModelManager::from_file(path)
-        .unwrap_or_else(|e| panic!("❌ Failed to initialize model manager: {}", e));
-    Arc::new(Mutex::new(mgr))
+
+    match ModelManager::from_file(path) {
+        Ok(mgr) => Ok(Arc::new(Mutex::new(mgr))),
+        Err(e) => Err(format!("{}", e))
+    }
 });
+
+async fn get_model_manager() -> Result<Arc<Mutex<ModelManager>>, BotError> {
+    MODEL_MANAGER.as_ref()
+        .map(|mgr| Arc::clone(mgr))
+        .map_err(|e| {
+            BotError::new("model_init_failed")
+                .push_str(e.clone())
+                .push_str("".to_string())
+                .push_str("To fix: Send SIGUSR2 signal to reinstall ONNX Runtime 1.22.0".to_string())
+                .push_str("The signal will automatically remove old version and install the correct one.".to_string())
+        })
+}
 
 pub struct RembgProcessor;
 #[async_trait]
@@ -115,100 +129,146 @@ impl TaskProcessor for RembgProcessor {
             return Ok(true);
         };
 
-        let attachment = ensure_unique_filenames(job.message.attachments)
-            .download_all(4)
-            .await;
+        // Try to process all attachments, catching any critical errors early
+        let processing_result: Result<Vec<(String, Vec<u8>)>, BotError> = async {
+            // Pre-initialize model manager to catch initialization errors early
+            let manager = get_model_manager().await?;
 
-        let mut converted_files = Vec::new();
+            let attachment = ensure_unique_filenames(job.message.attachments)
+                .download_all(4)
+                .await;
 
-        for attachment_memory in attachment {
-            if let Some(ref error) = attachment_memory.error {
-                let error_filename = format!("{}.error.txt", attachment_memory.filename_stem);
+            let mut converted_files = Vec::new();
 
-                let error_content = format!(
-                    "Error downloading file: {}\n\nError details:\n{}\n\nTimestamp: {}",
-                    attachment_memory.meta.filename,
-                    error,
-                    chrono::Utc::now().format("%Y-%m-%d %H:%M:%S UTC")
-                );
-                converted_files.push((error_filename, error_content.into_bytes()));
-                continue;
-            }
-
-            let options = RemovalOptions {
-                threshold: job.threshold,
-                binary: job.binary,
-                ..Default::default()
-            };
-
-            let result: Result<Vec<(String, Vec<u8>)>, BotError> = async {
-                // Decode input to RGBA image
-                let img = decode_to_rgba(&attachment_memory.bytes)?;
-
-                // Get global model manager
-                let manager = Arc::clone(&MODEL_MANAGER);
-                let mut manager_lock = manager.lock().await;
-
-                // Run background removal
-                let removal_result = rembg(&mut *manager_lock, img, &options)?;
-
-                // Extract images
-                let img: &RgbaImage = removal_result.image();
-                let mask_img: &RgbImage = removal_result.mask();
-
-                // Encode result to PNG bytes
-                let mut buf_image = Vec::new();
-                let mut buf_mask = Vec::new();
-
-                // Rgba → PNG
-                {
-                    let dyn_img = DynamicImage::ImageRgba8(img.clone());
-                    dyn_img.write_to(&mut Cursor::new(&mut buf_image), ImageFormat::Png)?;
-                }
-
-                // Mask → PNG
-                {
-                    let dyn_mask = DynamicImage::ImageRgb8(mask_img.clone());
-                    dyn_mask.write_to(&mut Cursor::new(&mut buf_mask), ImageFormat::Png)?;
-                }
-
-                let (image_bytes, mask_bytes) = (buf_image, buf_mask);
-
-                let mut files = Vec::new();
-
-                // Add processed image
-                let image_filename = format!("{}_no_bg.png", attachment_memory.filename_stem);
-                files.push((image_filename, image_bytes));
-
-                // Add mask if requested
-                if job.mask {
-                    let mask_filename = format!("{}_mask.png", attachment_memory.filename_stem);
-                    files.push((mask_filename, mask_bytes));
-                }
-
-                Ok(files)
-            }
-            .await;
-
-            match result {
-                Ok(files) => {
-                    for (filename, bytes) in files {
-                        converted_files.push((filename, bytes));
-                    }
-                }
-                Err(e) => {
+            for attachment_memory in attachment {
+                if let Some(ref error) = attachment_memory.error {
                     let error_filename = format!("{}.error.txt", attachment_memory.filename_stem);
 
                     let error_content = format!(
-                        "Error processing file: {}\n\nError details:\n{:?}\n\nTimestamp: {}",
+                        "Error downloading file: {}\n\nError details:\n{}\n\nTimestamp: {}",
                         attachment_memory.meta.filename,
-                        e,
+                        error,
                         chrono::Utc::now().format("%Y-%m-%d %H:%M:%S UTC")
                     );
                     converted_files.push((error_filename, error_content.into_bytes()));
+                    continue;
+                }
+
+                let options = RemovalOptions {
+                    threshold: job.threshold,
+                    binary: job.binary,
+                    ..Default::default()
+                };
+
+                let result: Result<Vec<(String, Vec<u8>)>, BotError> = async {
+                    // Decode input to RGBA image
+                    let img = decode_to_rgba(&attachment_memory.bytes)?;
+
+                    // Use already initialized model manager
+                    let mut manager_lock = manager.lock().await;
+
+                    // Run background removal
+                    let removal_result = rembg(&mut *manager_lock, img, &options)?;
+
+                    // Extract images
+                    let img: &RgbaImage = removal_result.image();
+                    let mask_img: &RgbImage = removal_result.mask();
+
+                    // Encode result to PNG bytes
+                    let mut buf_image = Vec::new();
+                    let mut buf_mask = Vec::new();
+
+                    // Rgba → PNG
+                    {
+                        let dyn_img = DynamicImage::ImageRgba8(img.clone());
+                        dyn_img.write_to(&mut Cursor::new(&mut buf_image), ImageFormat::Png)?;
+                    }
+
+                    // Mask → PNG
+                    {
+                        let dyn_mask = DynamicImage::ImageRgb8(mask_img.clone());
+                        dyn_mask.write_to(&mut Cursor::new(&mut buf_mask), ImageFormat::Png)?;
+                    }
+
+                    let (image_bytes, mask_bytes) = (buf_image, buf_mask);
+
+                    let mut files = Vec::new();
+
+                    // Add processed image
+                    let image_filename = format!("{}_no_bg.png", attachment_memory.filename_stem);
+                    files.push((image_filename, image_bytes));
+
+                    // Add mask if requested
+                    if job.mask {
+                        let mask_filename = format!("{}_mask.png", attachment_memory.filename_stem);
+                        files.push((mask_filename, mask_bytes));
+                    }
+
+                    Ok(files)
+                }
+                .await;
+
+                match result {
+                    Ok(files) => {
+                        for (filename, bytes) in files {
+                            converted_files.push((filename, bytes));
+                        }
+                    }
+                    Err(e) => {
+                        let error_filename = format!("{}.error.txt", attachment_memory.filename_stem);
+
+                        let error_content = format!(
+                            "Error processing file: {}\n\nError details:\n{:?}\n\nTimestamp: {}",
+                            attachment_memory.meta.filename,
+                            e,
+                            chrono::Utc::now().format("%Y-%m-%d %H:%M:%S UTC")
+                        );
+                        converted_files.push((error_filename, error_content.into_bytes()));
+                    }
                 }
             }
-        }
+
+            Ok(converted_files)
+        }.await;
+
+        // Handle critical errors (like model initialization failure)
+        let converted_files = match processing_result {
+            Ok(files) => files,
+            Err(e) => {
+                // Send error message to user
+                let error_content = format!(
+                    "❌ Critical Error\n\n{}\n\nTimestamp: {}",
+                    e.to_string(),
+                    chrono::Utc::now().format("%Y-%m-%d %H:%M:%S UTC")
+                );
+
+                let error_file = vec![("error.txt".to_string(), error_content.into_bytes())];
+
+                let _ = MessageSend {
+                    content: Some("❌ Failed to process images due to a critical error. See attached file for details.".to_string()),
+                    message_reference: None,
+                    attachments: Some(error_file),
+                }
+                .send(Method::PATCH, &job.message.channel_id, Some(&reply.id))
+                .await;
+
+                // Mark job as failed
+                collection
+                    .update_one(
+                        doc! { "_id": job.id.unwrap() },
+                        doc! {
+                            "$set": {
+                                JobRembg::STATUS: QueueStatus::Failed.as_ref(),
+                                JobRembg::COMPLETED: Bson::DateTime(bson::DateTime::now())
+                            }
+                        },
+                    )
+                    .await?;
+
+                notify_workers::<RembgProcessor>();
+                return Ok(true);
+            }
+        };
 
         // Send response
         {

@@ -16,7 +16,7 @@ async fn download_models_and_runtime() -> Result<(), BotError> {
     use std::process::Command;
     use tokio::fs;
 
-    // Check and install ONNX Runtime
+    // Install/Reinstall ONNX Runtime
     eprintln!("🔍 Checking ONNX Runtime installation...");
 
     let check_output = Command::new("ldconfig").arg("-p").output();
@@ -29,68 +29,79 @@ async fn download_models_and_runtime() -> Result<(), BotError> {
     };
 
     if onnx_installed {
-        eprintln!("✅ ONNX Runtime already installed");
-    } else {
-        eprintln!("📦 Installing ONNX Runtime 1.16.0...");
+        eprintln!("⚠️  ONNX Runtime detected - will reinstall to ensure correct version");
+        eprintln!("📦 Removing old ONNX Runtime files...");
 
-        let client = state::client().await;
-        let url = "https://github.com/microsoft/onnxruntime/releases/download/v1.16.0/onnxruntime-linux-x64-1.16.0.tgz";
-
-        eprintln!("  Downloading (~16 MB)...");
-        let response = client.get(url).send().await?;
-        let bytes = response.bytes().await?;
-
-        eprintln!("  Extracting...");
-        let tmp_dir = "/tmp/onnxruntime-download";
-        fs::create_dir_all(tmp_dir).await?;
-
-        let tar_path = format!("{}/onnxruntime.tgz", tmp_dir);
-        fs::write(&tar_path, bytes).await?;
-
-        // Extract tar.gz
-        let extract_result = Command::new("tar")
-            .arg("-xzf")
-            .arg(&tar_path)
-            .arg("-C")
-            .arg(tmp_dir)
+        let rm_result = Command::new("sudo")
+            .arg("rm")
+            .arg("-f")
+            .arg("/usr/local/lib/libonnxruntime.so*")
             .output()?;
 
-        if !extract_result.status.success() {
-            return Err(error::BotError::new("onnx_extract_failed")
-                .push_str("Failed to extract ONNX Runtime archive".to_string()));
+        if !rm_result.status.success() {
+            eprintln!("  [WARN] Failed to remove old ONNX Runtime files, continuing anyway...");
         }
-
-        eprintln!("  Installing to /usr/local/lib...");
-
-        // Copy all .so files with wildcard
-        let cp_result = Command::new("bash")
-            .arg("-c")
-            .arg(format!(
-                "sudo cp {}/onnxruntime-linux-x64-1.16.0/lib/libonnxruntime.so* /usr/local/lib/",
-                tmp_dir
-            ))
-            .output()?;
-
-        if !cp_result.status.success() {
-            let stderr = String::from_utf8_lossy(&cp_result.stderr);
-            eprintln!("  Copy error: {}", stderr);
-            return Err(error::BotError::new("onnx_install_failed").push_str(
-                "Failed to copy ONNX Runtime library. Run with sudo permissions.".to_string(),
-            ));
-        }
-
-        eprintln!("  Updating library cache...");
-        let ldconfig_result = Command::new("sudo").arg("ldconfig").output()?;
-
-        if !ldconfig_result.status.success() {
-            eprintln!("  [WARN] ldconfig failed, but continuing...");
-        }
-
-        eprintln!("  Cleaning up...");
-        let _ = fs::remove_dir_all(tmp_dir).await;
-
-        eprintln!("✅ ONNX Runtime installed successfully");
     }
+
+    eprintln!("📦 Installing ONNX Runtime 1.22.0...");
+
+    let client = state::client().await;
+    let url = "https://github.com/microsoft/onnxruntime/releases/download/v1.22.0/onnxruntime-linux-x64-1.22.0.tgz";
+
+    eprintln!("  Downloading (~16 MB)...");
+    let response = client.get(url).send().await?;
+    let bytes = response.bytes().await?;
+
+    eprintln!("  Extracting...");
+    let tmp_dir = "/tmp/onnxruntime-download";
+    fs::create_dir_all(tmp_dir).await?;
+
+    let tar_path = format!("{}/onnxruntime.tgz", tmp_dir);
+    fs::write(&tar_path, bytes).await?;
+
+    // Extract tar.gz
+    let extract_result = Command::new("tar")
+        .arg("-xzf")
+        .arg(&tar_path)
+        .arg("-C")
+        .arg(tmp_dir)
+        .output()?;
+
+    if !extract_result.status.success() {
+        return Err(error::BotError::new("onnx_extract_failed")
+            .push_str("Failed to extract ONNX Runtime archive".to_string()));
+    }
+
+    eprintln!("  Installing to /usr/local/lib...");
+
+    // Copy all .so files with wildcard
+    let cp_result = Command::new("bash")
+        .arg("-c")
+        .arg(format!(
+            "sudo cp {}/onnxruntime-linux-x64-1.22.0/lib/libonnxruntime.so* /usr/local/lib/",
+            tmp_dir
+        ))
+        .output()?;
+
+    if !cp_result.status.success() {
+        let stderr = String::from_utf8_lossy(&cp_result.stderr);
+        eprintln!("  Copy error: {}", stderr);
+        return Err(error::BotError::new("onnx_install_failed").push_str(
+            "Failed to copy ONNX Runtime library. Run with sudo permissions.".to_string(),
+        ));
+    }
+
+    eprintln!("  Updating library cache...");
+    let ldconfig_result = Command::new("sudo").arg("ldconfig").output()?;
+
+    if !ldconfig_result.status.success() {
+        eprintln!("  [WARN] ldconfig failed, but continuing...");
+    }
+
+    eprintln!("  Cleaning up...");
+    let _ = fs::remove_dir_all(tmp_dir).await;
+
+    eprintln!("✅ ONNX Runtime 1.22.0 installed successfully");
 
     // Download models
     eprintln!("\n📦 Downloading AI models...");
