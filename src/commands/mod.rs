@@ -6,6 +6,7 @@ mod png;
 mod rembg;
 mod raw2i;
 mod i2raw;
+mod tailcut;
 
 use crate::error::{BotError};
 use crate::discord::discord::Interaction;
@@ -50,6 +51,7 @@ pub fn all_commands() -> Vec<SlashCommand> {
         rembg::Rembg::definition(),
         raw2i::Raw2i::definition(),
         i2raw::I2raw::definition(),
+        tailcut::Tailcut::definition(),
     ]
 }
 
@@ -73,6 +75,7 @@ pub async fn handle_interaction(interaction: Interaction) -> Result<(), BotError
         "raw2i" => raw2i::Raw2i::handle(interaction).await,
         "i2raw" => i2raw::I2raw::handle(interaction).await,
         "link" => link::Link::handle(interaction).await,
+        "tailcut" => tailcut::Tailcut::handle(interaction).await,
         _ => Ok(()), // Unknown command, ignore
     }
 }

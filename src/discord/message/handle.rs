@@ -10,6 +10,7 @@ pub enum CommandKind {
     Png,
     Rembg, // includes "rembg" and "bg" aliases
     Icon,
+    Tailcut,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -53,6 +54,7 @@ pub fn parse_command_args(content: &str, _bot_id: &str) -> Option<CommandArgs> {
         "png" => CommandKind::Png,
         "rembg" | "bg" => CommandKind::Rembg,
         "icon" => CommandKind::Icon,
+        "tailcut" | "tc" => CommandKind::Tailcut,
         _ => return None,
     };
 
@@ -102,6 +104,9 @@ pub async fn handle_message(message: Message) -> Result<(), BotError> {
         }
         CommandKind::Icon => {
             crate::workers::icon::handle::handle(message, &args).await
+        }
+        CommandKind::Tailcut => {
+            crate::workers::tailcut::handle::handle(message, &args).await
         }
     }
 }

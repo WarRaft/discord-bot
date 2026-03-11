@@ -68,6 +68,13 @@ impl MessageSend {
         )
         .await;
 
+        let status = response.status();
+        if !status.is_success() {
+            let body = response.text().await.unwrap_or_default();
+            return Err(BotError::new("discord_api_error")
+                .push_str(format!("HTTP {}: {}", status, body)));
+        }
+
         let msg: Message = response.json().await?;
         Ok(msg)
     }
