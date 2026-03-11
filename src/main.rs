@@ -191,6 +191,12 @@ async fn run_bot() -> Result<(), BotError> {
 
 #[tokio::main]
 async fn main() -> Result<(), BotError> {
+    // Must be called before any TLS usage — reqwest, tokio-tungstenite and mongodb
+    // all share the same rustls instance, so one provider for all.
+    rustls::crypto::aws_lc_rs::default_provider()
+        .install_default()
+        .expect("Failed to install rustls crypto provider");
+
     let token = option_env!("DISCORD_BOT_TOKEN")
         .map(String::from)
         .or_else(|| env::var("DISCORD_BOT_TOKEN").ok())

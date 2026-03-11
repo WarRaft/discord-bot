@@ -1,6 +1,7 @@
 mod ahoy;
 mod blp;
 mod icon;
+mod link;
 mod png;
 mod rembg;
 mod raw2i;
@@ -44,6 +45,7 @@ pub fn all_commands() -> Vec<SlashCommand> {
         ahoy::Ahoy::definition(),
         blp::Blp::definition(),
         icon::Icon::definition(),
+        link::Link::definition(),
         png::Png::definition(),
         rembg::Rembg::definition(),
         raw2i::Raw2i::definition(),
@@ -70,6 +72,7 @@ pub async fn handle_interaction(interaction: Interaction) -> Result<(), BotError
         "rembg" => rembg::Rembg::handle(interaction).await,
         "raw2i" => raw2i::Raw2i::handle(interaction).await,
         "i2raw" => i2raw::I2raw::handle(interaction).await,
+        "link" => link::Link::handle(interaction).await,
         _ => Ok(()), // Unknown command, ignore
     }
 }
